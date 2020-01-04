@@ -1,5 +1,6 @@
 #include "extensions/filters/http/buffer/buffer_filter.h"
 
+#include "envoy/config/filter/http/buffer/v2/buffer.pb.h"
 #include "envoy/event/dispatcher.h"
 #include "envoy/http/codes.h"
 
@@ -9,6 +10,7 @@
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
 #include "common/http/utility.h"
+#include "common/runtime/runtime_impl.h"
 
 #include "extensions/filters/http/well_known_names.h"
 
@@ -49,15 +51,12 @@ void BufferFilter::initConfig() {
 
   const std::string& name = HttpFilterNames::get().Buffer;
   const auto* entry = callbacks_->route()->routeEntry();
-
-  const BufferFilterSettings* tmp = entry->perFilterConfigTyped<BufferFilterSettings>(name);
-  const BufferFilterSettings* route_local =
-      tmp ? tmp : entry->virtualHost().perFilterConfigTyped<BufferFilterSettings>(name);
+  const auto* route_local = entry->mostSpecificPerFilterConfigTyped<BufferFilterSettings>(name);
 
   settings_ = route_local ? route_local : settings_;
 }
 
-Http::FilterHeadersStatus BufferFilter::decodeHeaders(Http::HeaderMap&, bool end_stream) {
+Http::FilterHeadersStatus BufferFilter::decodeHeaders(Http::HeaderMap& headers, bool end_stream) {
   if (end_stream) {
     // If this is a header-only request, we don't need to do any buffering.
     return Http::FilterHeadersStatus::Continue;
@@ -70,12 +69,16 @@ Http::FilterHeadersStatus BufferFilter::decodeHeaders(Http::HeaderMap&, bool end
   }
 
   callbacks_->setDecoderBufferLimit(settings_->maxRequestBytes());
+  request_headers_ = &headers;
 
   return Http::FilterHeadersStatus::StopIteration;
 }
 
-Http::FilterDataStatus BufferFilter::decodeData(Buffer::Instance&, bool end_stream) {
+Http::FilterDataStatus BufferFilter::decodeData(Buffer::Instance& data, bool end_stream) {
+  content_length_ += data.length();
   if (end_stream || settings_->disabled()) {
+    maybeAddContentLength();
+
     return Http::FilterDataStatus::Continue;
   }
 
@@ -84,11 +87,24 @@ Http::FilterDataStatus BufferFilter::decodeData(Buffer::Instance&, bool end_stre
 }
 
 Http::FilterTrailersStatus BufferFilter::decodeTrailers(Http::HeaderMap&) {
+  maybeAddContentLength();
+
   return Http::FilterTrailersStatus::Continue;
 }
 
 void BufferFilter::setDecoderFilterCallbacks(Http::StreamDecoderFilterCallbacks& callbacks) {
   callbacks_ = &callbacks;
+}
+
+void BufferFilter::maybeAddContentLength() {
+  // request_headers_ is initialized iff plugin is enabled.
+  if (request_headers_ != nullptr && request_headers_->ContentLength() == nullptr) {
+    ASSERT(!settings_->disabled());
+    if (Runtime::runtimeFeatureEnabled(
+            "envoy.reloadable_features.buffer_filter_populate_content_length")) {
+      request_headers_->setContentLength(content_length_);
+    }
+  }
 }
 
 } // namespace BufferFilter

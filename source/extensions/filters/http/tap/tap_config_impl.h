@@ -1,6 +1,9 @@
 #pragma once
 
+#include "envoy/data/tap/v2alpha/common.pb.h"
+#include "envoy/data/tap/v2alpha/http.pb.h"
 #include "envoy/http/header_map.h"
+#include "envoy/service/tap/v2alpha/common.pb.h"
 
 #include "common/common/logger.h"
 
@@ -42,14 +45,15 @@ public:
   bool onDestroyLog() override;
 
 private:
-  using MutableBodyChunk =
-      envoy::data::tap::v2alpha::Body* (envoy::data::tap::v2alpha::HttpStreamedTraceSegment::*)();
-  using MutableMessage = envoy::data::tap::v2alpha::HttpBufferedTrace::Message* (
-      envoy::data::tap::v2alpha::HttpBufferedTrace::*)();
+  using HttpStreamedTraceSegment = envoy::data::tap::v2alpha::HttpStreamedTraceSegment;
+  using MutableBodyChunk = envoy::data::tap::v2alpha::Body* (HttpStreamedTraceSegment::*)();
+  using HttpBufferedTrace = envoy::data::tap::v2alpha::HttpBufferedTrace;
+  using MutableMessage =
+      envoy::data::tap::v2alpha::HttpBufferedTrace::Message* (HttpBufferedTrace::*)();
 
   void onBody(const Buffer::Instance& data,
               Extensions::Common::Tap::TraceWrapperPtr& buffered_streamed_body,
-              uint32_t maxBufferedBytes, MutableBodyChunk mutable_body_chunk,
+              uint32_t max_buffered_bytes, MutableBodyChunk mutable_body_chunk,
               MutableMessage mutable_message);
 
   void makeBufferedFullTraceIfNeeded() {

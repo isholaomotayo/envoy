@@ -1,3 +1,4 @@
+#include "envoy/api/v2/core/base.pb.h"
 #include "envoy/network/address.h"
 
 #include "common/network/utility.h"
@@ -12,7 +13,6 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::Eq;
 
 namespace Envoy {
 namespace Extensions {

@@ -1,3 +1,5 @@
+#include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
+
 #include "test/integration/http_integration.h"
 #include "test/mocks/http/mocks.h"
 #include "test/test_common/utility.h"
@@ -34,7 +36,11 @@ public:
             auto* route = virtual_host->add_routes();
             route->mutable_match()->set_prefix("/no-cors");
             route->mutable_route()->set_cluster("cluster_0");
-            route->mutable_route()->mutable_cors()->mutable_enabled()->set_value(false);
+            route->mutable_route()
+                ->mutable_cors()
+                ->mutable_filter_enabled()
+                ->mutable_default_value()
+                ->set_numerator(0);
           }
 
           {
@@ -50,6 +56,8 @@ public:
           }
 
           {
+            // TODO(mattklein123): When deprecated config is removed, remove DEPRECATED_FEATURE_TEST
+            // from all tests below.
             auto* route = virtual_host->add_routes();
             route->mutable_match()->set_prefix("/cors-credentials-allowed");
             route->mutable_route()->set_cluster("cluster_0");
@@ -63,7 +71,10 @@ public:
             route->mutable_match()->set_prefix("/cors-allow-origin-regex");
             route->mutable_route()->set_cluster("cluster_0");
             auto* cors = route->mutable_route()->mutable_cors();
-            cors->add_allow_origin_regex(".*\\.envoyproxy\\.io");
+            auto* safe_regex =
+                cors->mutable_allow_origin_string_match()->Add()->mutable_safe_regex();
+            safe_regex->mutable_google_re2();
+            safe_regex->set_regex(".*\\.envoyproxy\\.io");
           }
 
           {
@@ -111,7 +122,7 @@ INSTANTIATE_TEST_SUITE_P(IpVersions, CorsFilterIntegrationTest,
                          testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
                          TestUtility::ipTestParamsToString);
 
-TEST_P(CorsFilterIntegrationTest, TestVHostConfigSuccess) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestVHostConfigSuccess)) {
   testPreflight(
       Http::TestHeaderMapImpl{
           {":method", "OPTIONS"},
@@ -131,7 +142,7 @@ TEST_P(CorsFilterIntegrationTest, TestVHostConfigSuccess) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestRouteConfigSuccess) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestRouteConfigSuccess)) {
   testPreflight(
       Http::TestHeaderMapImpl{
           {":method", "OPTIONS"},
@@ -152,7 +163,7 @@ TEST_P(CorsFilterIntegrationTest, TestRouteConfigSuccess) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestRouteConfigBadOrigin) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestRouteConfigBadOrigin)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "OPTIONS"},
@@ -169,7 +180,7 @@ TEST_P(CorsFilterIntegrationTest, TestRouteConfigBadOrigin) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestCorsDisabled) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestCorsDisabled)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "OPTIONS"},
@@ -186,7 +197,34 @@ TEST_P(CorsFilterIntegrationTest, TestCorsDisabled) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestEncodeHeaders) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestLegacyCorsDisabled)) {
+  config_helper_.addConfigModifier(
+      [&](envoy::config::filter::network::http_connection_manager::v2::HttpConnectionManager& hcm)
+          -> void {
+        auto* route_config = hcm.mutable_route_config();
+        auto* virtual_host = route_config->mutable_virtual_hosts(0);
+        auto* route = virtual_host->add_routes();
+        route->mutable_match()->set_prefix("/legacy-no-cors");
+        route->mutable_route()->set_cluster("cluster_0");
+        route->mutable_route()->mutable_cors()->mutable_enabled()->set_value(false);
+      });
+  testNormalRequest(
+      Http::TestHeaderMapImpl{
+          {":method", "OPTIONS"},
+          {":path", "/legacy-no-cors/test"},
+          {":scheme", "http"},
+          {":authority", "test-host"},
+          {"access-control-request-method", "GET"},
+          {"origin", "test-origin"},
+      },
+      Http::TestHeaderMapImpl{
+          {"server", "envoy"},
+          {"content-length", "0"},
+          {":status", "200"},
+      });
+}
+
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestEncodeHeaders)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "GET"},
@@ -203,7 +241,7 @@ TEST_P(CorsFilterIntegrationTest, TestEncodeHeaders) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestEncodeHeadersCredentialsAllowed) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestEncodeHeadersCredentialsAllowed)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "GET"},
@@ -221,7 +259,7 @@ TEST_P(CorsFilterIntegrationTest, TestEncodeHeadersCredentialsAllowed) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestAllowedOriginRegex) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestAllowedOriginRegex)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "GET"},
@@ -239,7 +277,7 @@ TEST_P(CorsFilterIntegrationTest, TestAllowedOriginRegex) {
       });
 }
 
-TEST_P(CorsFilterIntegrationTest, TestExposeHeaders) {
+TEST_P(CorsFilterIntegrationTest, DEPRECATED_FEATURE_TEST(TestExposeHeaders)) {
   testNormalRequest(
       Http::TestHeaderMapImpl{
           {":method", "GET"},

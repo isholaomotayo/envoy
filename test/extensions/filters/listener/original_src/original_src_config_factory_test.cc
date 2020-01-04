@@ -1,6 +1,3 @@
-#include "envoy/config/filter/listener/original_src/v2alpha1/original_src.pb.h"
-#include "envoy/config/filter/listener/original_src/v2alpha1/original_src.pb.validate.h"
-
 #include "extensions/filters/listener/original_src/config.h"
 #include "extensions/filters/listener/original_src/original_src.h"
 #include "extensions/filters/listener/original_src/original_src_config_factory.h"
@@ -11,6 +8,7 @@
 #include "gtest/gtest.h"
 
 using testing::Invoke;
+using testing::NiceMock;
 
 namespace Envoy {
 namespace Extensions {
@@ -28,7 +26,7 @@ TEST(OriginalSrcConfigFactoryTest, TestCreateFactory) {
   ProtobufTypes::MessagePtr proto_config = factory.createEmptyConfigProto();
   TestUtility::loadFromYaml(yaml, *proto_config);
 
-  Server::Configuration::MockListenerFactoryContext context;
+  NiceMock<Server::Configuration::MockListenerFactoryContext> context;
 
   Network::ListenerFilterFactoryCb cb =
       factory.createFilterFactoryFromProto(*proto_config, context);

@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "envoy/service/auth/v2/external_auth.pb.h"
+
 #include "extensions/filters/common/ext_authz/ext_authz.h"
 
 #include "gmock/gmock.h"
@@ -16,7 +18,7 @@ namespace ExtAuthz {
 class MockClient : public Client {
 public:
   MockClient();
-  ~MockClient();
+  ~MockClient() override;
 
   // ExtAuthz::Client
   MOCK_METHOD0(cancel, void());
@@ -28,7 +30,7 @@ public:
 class MockRequestCallbacks : public RequestCallbacks {
 public:
   MockRequestCallbacks();
-  ~MockRequestCallbacks();
+  ~MockRequestCallbacks() override;
 
   void onComplete(ResponsePtr&& response) override { onComplete_(response); }
 

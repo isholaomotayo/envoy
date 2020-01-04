@@ -1,3 +1,5 @@
+#include "envoy/config/filter/network/redis_proxy/v2/redis_proxy.pb.validate.h"
+
 #include "common/upstream/health_checker_impl.h"
 
 #include "extensions/health_checkers/redis/config.h"
@@ -106,12 +108,14 @@ TEST(HealthCheckerFactoryTest, CreateRedisViaUpstreamHealthCheckerFactory) {
   Runtime::MockRandomGenerator random;
   Event::MockDispatcher dispatcher;
   AccessLog::MockAccessLogManager log_manager;
+  NiceMock<Api::MockApi> api;
 
-  EXPECT_NE(nullptr, dynamic_cast<CustomRedisHealthChecker*>(
-                         Upstream::HealthCheckerFactory::create(
-                             Upstream::parseHealthCheckFromV2Yaml(yaml), cluster, runtime, random,
-                             dispatcher, log_manager, ProtobufMessage::getStrictValidationVisitor())
-                             .get()));
+  EXPECT_NE(nullptr,
+            dynamic_cast<CustomRedisHealthChecker*>(
+                Upstream::HealthCheckerFactory::create(
+                    Upstream::parseHealthCheckFromV2Yaml(yaml), cluster, runtime, random,
+                    dispatcher, log_manager, ProtobufMessage::getStrictValidationVisitor(), api)
+                    .get()));
 }
 } // namespace
 } // namespace RedisHealthChecker

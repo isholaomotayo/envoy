@@ -6,6 +6,7 @@
 #include <string>
 
 #include "envoy/access_log/access_log.h"
+#include "envoy/common/scope_tracker.h"
 #include "envoy/event/dispatcher.h"
 #include "envoy/grpc/status.h"
 #include "envoy/http/codec.h"
@@ -185,6 +186,11 @@ public:
    * @return tracing configuration.
    */
   virtual const Tracing::Config& tracingConfig() PURE;
+
+  /**
+   * @return the ScopeTrackedObject for this stream.
+   */
+  virtual const ScopeTrackedObject& scope() PURE;
 };
 
 /**
@@ -236,7 +242,8 @@ public:
    *
    * 4) If additional data needs to be added in the decodeTrailers() callback, this method can be
    * called in the context of the callback. All further filters will receive decodeData(..., false)
-   * followed by decodeTrailers().
+   * followed by decodeTrailers(). However if the iteration is stopped, the added data will
+   * buffered, so that the further filters will not receive decodeData() before decodeHeaders().
    *
    * It is an error to call this method in any other case.
    *
@@ -556,7 +563,8 @@ public:
    *
    * 4) If additional data needs to be added in the encodeTrailers() callback, this method can be
    * called in the context of the callback. All further filters will receive encodeData(..., false)
-   * followed by encodeTrailers().
+   * followed by encodeTrailers(). However if the iteration is stopped, the added data will
+   * buffered, so that the further filters will not receive encodeData() before encodeHeaders().
    *
    * It is an error to call this method in any other case.
    *
@@ -602,6 +610,13 @@ public:
    * @return a reference to the newly created trailers map.
    */
   virtual HeaderMap& addEncodedTrailers() PURE;
+
+  /**
+   * Adds new metadata to be encoded.
+   *
+   * @param metadata_map supplies the unique_ptr of the metadata to be encoded.
+   */
+  virtual void addEncodedMetadata(MetadataMapPtr&& metadata_map) PURE;
 
   /**
    * Called when an encoder filter goes over its high watermark.

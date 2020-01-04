@@ -1,3 +1,5 @@
+#include "envoy/config/cluster/redis/redis_cluster.pb.validate.h"
+#include "envoy/config/filter/network/redis_proxy/v2/redis_proxy.pb.validate.h"
 #include "envoy/upstream/upstream.h"
 
 #include "source/extensions/clusters/redis/redis_cluster.h"
@@ -15,9 +17,10 @@ namespace Redis {
 class MockClusterSlotUpdateCallBack : public ClusterSlotUpdateCallBack {
 public:
   MockClusterSlotUpdateCallBack();
-  ~MockClusterSlotUpdateCallBack() = default;
+  ~MockClusterSlotUpdateCallBack() override = default;
 
-  MOCK_METHOD2(onClusterSlotUpdate, bool(const std::vector<ClusterSlot>&, Upstream::HostMap));
+  MOCK_METHOD2(onClusterSlotUpdate, bool(ClusterSlotsPtr&&, Upstream::HostMap));
+  MOCK_METHOD0(onHostHealthUpdate, void());
 };
 
 } // namespace Redis

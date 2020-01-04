@@ -1,5 +1,6 @@
 #pragma once
 
+#include "envoy/api/v2/core/base.pb.h"
 #include "envoy/network/address.h"
 #include "envoy/network/listen_socket.h"
 
@@ -18,7 +19,7 @@ public:
    * Constructs a socket option which will set the socket to use source @c src_address
    */
   OriginalSrcSocketOption(Network::Address::InstanceConstSharedPtr src_address);
-  ~OriginalSrcSocketOption() {}
+  ~OriginalSrcSocketOption() override = default;
 
   /**
    * Updates the source address of the socket to match `src_address_`.

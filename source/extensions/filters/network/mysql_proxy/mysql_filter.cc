@@ -1,5 +1,7 @@
 #include "extensions/filters/network/mysql_proxy/mysql_filter.h"
 
+#include "envoy/api/v2/core/base.pb.h"
+
 #include "common/buffer/buffer_impl.h"
 #include "common/common/assert.h"
 #include "common/common/logger.h"
@@ -72,7 +74,7 @@ DecoderPtr MySQLFilter::createDecoder(DecoderCallbacks& callbacks) {
 void MySQLFilter::onProtocolError() { config_->stats_.protocol_errors_.inc(); }
 
 void MySQLFilter::onNewMessage(MySQLSession::State state) {
-  if (state == MySQLSession::State::MYSQL_CHALLENGE_REQ) {
+  if (state == MySQLSession::State::ChallengeReq) {
     config_->stats_.login_attempts_.inc();
   }
 }
@@ -128,10 +130,10 @@ void MySQLFilter::onCommand(Command& command) {
     }
     hsql::TableAccessMap table_access_map;
     result.getStatement(i)->tablesAccessed(table_access_map);
-    for (auto it = table_access_map.begin(); it != table_access_map.end(); ++it) {
-      auto& operations = *fields[it->first].mutable_list_value();
-      for (auto ot = it->second.begin(); ot != it->second.end(); ++ot) {
-        operations.add_values()->set_string_value(*ot);
+    for (auto& it : table_access_map) {
+      auto& operations = *fields[it.first].mutable_list_value();
+      for (const auto& ot : it.second) {
+        operations.add_values()->set_string_value(ot);
       }
     }
   }

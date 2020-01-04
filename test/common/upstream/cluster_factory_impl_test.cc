@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "envoy/api/api.h"
+#include "envoy/api/v2/cds.pb.h"
 #include "envoy/http/codec.h"
 #include "envoy/upstream/cluster_manager.h"
 
@@ -24,11 +25,7 @@
 #include "test/mocks/server/mocks.h"
 #include "test/mocks/ssl/mocks.h"
 
-using testing::_;
-using testing::ContainerEq;
-using testing::Invoke;
 using testing::NiceMock;
-using testing::ReturnRef;
 
 namespace Envoy {
 namespace Upstream {

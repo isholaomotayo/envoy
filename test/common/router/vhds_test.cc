@@ -2,8 +2,9 @@
 #include <memory>
 #include <string>
 
-#include "envoy/admin/v2alpha/config_dump.pb.h"
-#include "envoy/admin/v2alpha/config_dump.pb.validate.h"
+#include "envoy/api/v2/discovery.pb.h"
+#include "envoy/api/v2/rds.pb.h"
+#include "envoy/api/v2/route/route.pb.h"
 #include "envoy/stats/scope.h"
 
 #include "common/config/utility.h"
@@ -23,13 +24,6 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-using testing::_;
-using testing::InSequence;
-using testing::Invoke;
-using testing::Return;
-using testing::ReturnRef;
-using testing::SaveArg;
 
 namespace Envoy {
 namespace Router {
@@ -87,7 +81,7 @@ vhds:
     return config_update_info;
   }
 
-  NiceMock<Server::Configuration::MockFactoryContext> factory_context_;
+  NiceMock<Server::Configuration::MockServerFactoryContext> factory_context_;
   Init::ExpectableWatcherImpl init_watcher_;
   Init::TargetHandlePtr init_target_handle_;
   const std::string context_ = "vhds_test";

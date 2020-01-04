@@ -10,6 +10,7 @@
 #include "envoy/config/filter/network/redis_proxy/v2/redis_proxy.pb.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/thread_local/thread_local.h"
+#include "envoy/type/percent.pb.h"
 #include "envoy/upstream/cluster_manager.h"
 
 #include "common/common/to_lower_table.h"
@@ -37,10 +38,11 @@ public:
 
 private:
   const std::string runtime_key_;
-  const envoy::type::FractionalPercent default_value_;
+  const absl::optional<envoy::type::FractionalPercent> default_value_;
   const bool exclude_read_commands_;
   ConnPool::InstanceSharedPtr upstream_;
   Runtime::Loader& runtime_;
+  const ToLowerTable to_lower_table_;
 };
 
 class Prefix : public Route {

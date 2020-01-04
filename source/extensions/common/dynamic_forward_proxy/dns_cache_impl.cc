@@ -1,5 +1,8 @@
 #include "extensions/common/dynamic_forward_proxy/dns_cache_impl.h"
 
+#include "envoy/config/common/dynamic_forward_proxy/v2alpha/dns_cache.pb.h"
+
+#include "common/http/utility.h"
 #include "common/network/utility.h"
 
 // TODO(mattklein123): Move DNS family helpers to a smaller include.
@@ -16,7 +19,7 @@ DnsCacheImpl::DnsCacheImpl(
     const envoy::config::common::dynamic_forward_proxy::v2alpha::DnsCacheConfig& config)
     : main_thread_dispatcher_(main_thread_dispatcher),
       dns_lookup_family_(Upstream::getDnsLookupFamilyFromEnum(config.dns_lookup_family())),
-      resolver_(main_thread_dispatcher.createDnsResolver({})), tls_slot_(tls.allocateSlot()),
+      resolver_(main_thread_dispatcher.createDnsResolver({}, false)), tls_slot_(tls.allocateSlot()),
       scope_(root_scope.createScope(fmt::format("dns_cache.{}.", config.name()))),
       stats_{ALL_DNS_CACHE_STATS(POOL_COUNTER(*scope_), POOL_GAUGE(*scope_))},
       refresh_interval_(PROTOBUF_GET_MS_OR_DEFAULT(config, dns_refresh_rate, 60000)),
@@ -64,6 +67,17 @@ DnsCacheImpl::loadDnsCacheEntry(absl::string_view host, uint16_t default_port,
   }
 }
 
+absl::flat_hash_map<std::string, DnsHostInfoSharedPtr> DnsCacheImpl::hosts() {
+  absl::flat_hash_map<std::string, DnsHostInfoSharedPtr> ret;
+  for (const auto& host : primary_hosts_) {
+    // Only include hosts that have ever resolved to an address.
+    if (host.second->host_info_->address_ != nullptr) {
+      ret.emplace(host.first, host.second->host_info_);
+    }
+  }
+  return ret;
+}
+
 DnsCacheImpl::AddUpdateCallbacksHandlePtr
 DnsCacheImpl::addUpdateCallbacks(UpdateCallbacks& callbacks) {
   return std::make_unique<AddUpdateCallbacksHandleImpl>(update_callbacks_, callbacks);
@@ -79,35 +93,19 @@ void DnsCacheImpl::startCacheLoad(const std::string& host, uint16_t default_port
     return;
   }
 
-  // TODO(mattklein123): Figure out if we want to support addresses of the form <IP>:<port>. This
-  //                     seems unlikely to be useful in TLS scenarios, but it is technically
-  //                     supported. We might want to block this form for now.
-  const auto colon_pos = host.find(':');
-  absl::string_view host_to_resolve = host;
-  if (colon_pos != absl::string_view::npos) {
-    const absl::string_view string_view_host = host;
-    host_to_resolve = string_view_host.substr(0, colon_pos);
-    const auto port_str = string_view_host.substr(colon_pos + 1);
-    uint64_t port64;
-    if (port_str.empty() || !absl::SimpleAtoi(port_str, &port64) || port64 > 65535) {
-      // Just attempt to resolve whatever we were given. This will very likely fail.
-      // TODO(mattklein123): Should we actually fail here or do something different?
-      host_to_resolve = host;
-    } else {
-      default_port = port64;
-    }
-  }
+  const auto host_attributes = Http::Utility::parseAuthority(host);
 
   // TODO(mattklein123): Right now, the same host with different ports will become two
   // independent primary hosts with independent DNS resolutions. I'm not sure how much this will
   // matter, but we could consider collapsing these down and sharing the underlying DNS resolution.
-  auto& primary_host =
-      *primary_hosts_
-           // try_emplace() is used here for direct argument forwarding.
-           .try_emplace(host,
-                        std::make_unique<PrimaryHostInfo>(*this, host_to_resolve, default_port,
-                                                          [this, host]() { onReResolve(host); }))
-           .first->second;
+  auto& primary_host = *primary_hosts_
+                            // try_emplace() is used here for direct argument forwarding.
+                            .try_emplace(host, std::make_unique<PrimaryHostInfo>(
+                                                   *this, std::string(host_attributes.host_),
+                                                   host_attributes.port_.value_or(default_port),
+                                                   host_attributes.is_ip_address_,
+                                                   [this, host]() { onReResolve(host); }))
+                            .first->second;
   startResolve(host, primary_host);
 }
 
@@ -244,11 +242,11 @@ void DnsCacheImpl::ThreadLocalHostInfo::updateHostMap(const TlsHostMapSharedPtr&
 
 DnsCacheImpl::PrimaryHostInfo::PrimaryHostInfo(DnsCacheImpl& parent,
                                                absl::string_view host_to_resolve, uint16_t port,
-                                               const Event::TimerCb& timer_cb)
+                                               bool is_ip_address, const Event::TimerCb& timer_cb)
     : parent_(parent), port_(port),
       refresh_timer_(parent.main_thread_dispatcher_.createTimer(timer_cb)),
       host_info_(std::make_shared<DnsHostInfoImpl>(parent.main_thread_dispatcher_.timeSource(),
-                                                   host_to_resolve)) {
+                                                   host_to_resolve, is_ip_address)) {
   parent_.stats_.host_added_.inc();
   parent_.stats_.num_hosts_.inc();
 }

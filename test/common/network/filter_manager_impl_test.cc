@@ -1,6 +1,9 @@
 #include <string>
 #include <vector>
 
+#include "envoy/config/filter/network/rate_limit/v2/rate_limit.pb.h"
+#include "envoy/config/filter/network/tcp_proxy/v2/tcp_proxy.pb.h"
+
 #include "common/buffer/buffer_impl.h"
 #include "common/network/filter_manager_impl.h"
 #include "common/tcp_proxy/tcp_proxy.h"
@@ -56,7 +59,7 @@ public:
 
 class LocalMockFilter : public MockFilter {
 public:
-  ~LocalMockFilter() {
+  ~LocalMockFilter() override {
     // Make sure the upstream host is still valid in the filter destructor.
     callbacks_->upstreamHost()->address();
   }
@@ -409,10 +412,11 @@ stat_prefix: name
 
   EXPECT_EQ(manager.initializeReadFilters(), true);
 
-  EXPECT_CALL(factory_context.cluster_manager_, tcpConnPoolForCluster("fake_cluster", _, _, _))
+  EXPECT_CALL(factory_context.cluster_manager_, tcpConnPoolForCluster("fake_cluster", _, _))
       .WillOnce(Return(&conn_pool));
 
-  request_callbacks->complete(Extensions::Filters::Common::RateLimit::LimitStatus::OK, nullptr);
+  request_callbacks->complete(Extensions::Filters::Common::RateLimit::LimitStatus::OK, nullptr,
+                              nullptr);
 
   conn_pool.poolReady(upstream_connection);
 

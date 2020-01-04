@@ -2,9 +2,9 @@ licenses(["notice"])  # Apache 2
 
 load(
     "//bazel:envoy_build_system.bzl",
-    "envoy_cc_binary",
     "envoy_cc_fuzz_test",
     "envoy_cc_test",
+    "envoy_cc_test_binary",
     "envoy_package",
 )
 
@@ -55,10 +55,23 @@ envoy_cc_fuzz_test(
     deps = ["//source/common/common:utility_lib"],
 )
 
+envoy_cc_fuzz_test(
+    name = "hash_fuzz_test",
+    srcs = ["hash_fuzz_test.cc"],
+    corpus = "hash_corpus",
+    deps = ["//source/common/common:hash_lib"],
+)
+
 envoy_cc_test(
     name = "cleanup_test",
     srcs = ["cleanup_test.cc"],
     deps = ["//source/common/common:cleanup_lib"],
+)
+
+envoy_cc_test(
+    name = "mem_block_builder_test",
+    srcs = ["mem_block_builder_test.cc"],
+    deps = ["//source/common/common:mem_block_builder_lib"],
 )
 
 envoy_cc_test(
@@ -96,7 +109,25 @@ envoy_cc_test(
         "//test/mocks/http:http_mocks",
         "//test/mocks/network:network_mocks",
         "//test/mocks/upstream:upstream_mocks",
+        "//test/test_common:logging_lib",
     ],
+)
+
+envoy_cc_test(
+    name = "logger_test",
+    srcs = ["logger_test.cc"],
+    deps = [
+        "//source/common/common:minimal_logger_lib",
+    ],
+)
+
+envoy_cc_fuzz_test(
+    name = "logger_fuzz_test",
+    srcs = ["logger_fuzz_test.cc"],
+    corpus = "logger_corpus",
+    # TODO(github.com/envoyproxy/envoy#8893): Re-enable once more fuzz tests are added
+    tags = ["no_fuzz"],
+    deps = ["//source/common/common:minimal_logger_lib"],
 )
 
 envoy_cc_test(
@@ -106,10 +137,8 @@ envoy_cc_test(
         "//source/common/common:matchers_lib",
         "//source/common/config:metadata_lib",
         "//source/common/protobuf:utility_lib",
-        "@envoy_api//envoy/api/v2/core:base_cc",
-        "@envoy_api//envoy/type/matcher:metadata_cc",
-        "@envoy_api//envoy/type/matcher:number_cc",
-        "@envoy_api//envoy/type/matcher:string_cc",
+        "@envoy_api//envoy/api/v2/core:pkg_cc_proto",
+        "@envoy_api//envoy/type/matcher:pkg_cc_proto",
     ],
 )
 
@@ -133,6 +162,16 @@ envoy_cc_test(
         "//source/common/common:utility_lib",
         "//test/test_common:test_time_lib",
         "//test/test_common:utility_lib",
+    ],
+)
+
+envoy_cc_test(
+    name = "regex_test",
+    srcs = ["regex_test.cc"],
+    deps = [
+        "//source/common/common:regex_lib",
+        "//test/test_common:utility_lib",
+        "@envoy_api//envoy/type/matcher:pkg_cc_proto",
     ],
 )
 
@@ -182,7 +221,7 @@ envoy_cc_test(
     deps = ["//source/common/common:callback_impl_lib"],
 )
 
-envoy_cc_binary(
+envoy_cc_test_binary(
     name = "utility_speed_test",
     srcs = ["utility_speed_test.cc"],
     external_deps = [

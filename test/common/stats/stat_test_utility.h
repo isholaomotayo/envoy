@@ -2,6 +2,7 @@
 
 #include "common/common/logger.h"
 #include "common/memory/stats.h"
+#include "common/stats/symbol_table_creator.h"
 
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
@@ -103,6 +104,21 @@ private:
           upper_bound);                                                                            \
     }                                                                                              \
   } while (false)
+
+class SymbolTableCreatorTestPeer {
+public:
+  static void setUseFakeSymbolTables(bool use_fakes) {
+    SymbolTableCreator::setUseFakeSymbolTables(use_fakes);
+  }
+};
+
+// Serializes a number into a uint8_t array, and check that it de-serializes to
+// the same number. The serialized number is also returned, which can be
+// checked in unit tests, but ignored in fuzz tests.
+std::vector<uint8_t> serializeDeserializeNumber(uint64_t number);
+
+// Serializes a string into a MemBlock and then decodes it.
+void serializeDeserializeString(absl::string_view in);
 
 } // namespace TestUtil
 } // namespace Stats

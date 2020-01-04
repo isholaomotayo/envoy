@@ -1,9 +1,15 @@
+#include "envoy/api/v2/cds.pb.h"
+#include "envoy/api/v2/core/base.pb.h"
+#include "envoy/api/v2/discovery.pb.h"
 #include "envoy/api/v2/eds.pb.h"
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/config/filter/http/router/v2/router.pb.h"
 #include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
 
+#include "common/config/api_version.h"
 #include "common/config/metadata.h"
 #include "common/config/resources.h"
+#include "common/http/exception.h"
 #include "common/protobuf/protobuf.h"
 
 #include "test/integration/http_integration.h"
@@ -268,7 +274,7 @@ public:
           TestUtility::loadFromYaml(http_connection_mgr_config, hcm);
           envoy::config::filter::http::router::v2::Router router_config;
           router_config.set_suppress_envoy_headers(routerSuppressEnvoyHeaders());
-          TestUtility::jsonConvert(router_config, *hcm.mutable_http_filters(0)->mutable_config());
+          hcm.mutable_http_filters(0)->mutable_typed_config()->PackFrom(router_config);
 
           const bool append = mode == HeaderMode::Append;
 
@@ -363,16 +369,16 @@ public:
         RELEASE_ASSERT(result, result.message());
         eds_stream_->startGrpcStream();
 
-        envoy::api::v2::DiscoveryRequest discovery_request;
+        API_NO_BOOST(envoy::api::v2::DiscoveryRequest) discovery_request;
         result = eds_stream_->waitForGrpcMessage(*dispatcher_, discovery_request);
         RELEASE_ASSERT(result, result.message());
 
-        envoy::api::v2::DiscoveryResponse discovery_response;
+        API_NO_BOOST(envoy::api::v2::DiscoveryResponse) discovery_response;
         discovery_response.set_version_info("1");
         discovery_response.set_type_url(Config::TypeUrl::get().ClusterLoadAssignment);
 
-        envoy::api::v2::ClusterLoadAssignment cluster_load_assignment =
-            TestUtility::parseYaml<envoy::api::v2::ClusterLoadAssignment>(fmt::format(
+        auto cluster_load_assignment =
+            TestUtility::parseYaml<API_NO_BOOST(envoy::api::v2::ClusterLoadAssignment)>(fmt::format(
                 R"EOF(
                 cluster_name: cluster_0
                 endpoints:
@@ -1065,6 +1071,75 @@ TEST_P(HeaderIntegrationTest, TestPathAndRouteOnNormalizedPath) {
           {"server", "envoy"},
           {"x-unmodified", "response"},
           {":status", "200"},
+      });
+}
+
+// Validates TE header is forwarded if it contains a supported value
+TEST_P(HeaderIntegrationTest, TestTeHeaderPassthrough) {
+  initializeFilter(HeaderMode::Append, false);
+  performRequest(
+      Http::TestHeaderMapImpl{
+          {":method", "GET"},
+          {":path", "/"},
+          {":scheme", "http"},
+          {":authority", "no-headers.com"},
+          {"x-request-foo", "downstram"},
+          {"connection", "te, close"},
+          {"te", "trailers"},
+      },
+      Http::TestHeaderMapImpl{
+          {":authority", "no-headers.com"},
+          {":path", "/"},
+          {":method", "GET"},
+          {"x-request-foo", "downstram"},
+          {"te", "trailers"},
+      },
+      Http::TestHeaderMapImpl{
+          {"server", "envoy"},
+          {"content-length", "0"},
+          {":status", "200"},
+          {"x-return-foo", "upstream"},
+      },
+      Http::TestHeaderMapImpl{
+          {"server", "envoy"},
+          {"x-return-foo", "upstream"},
+          {":status", "200"},
+      });
+}
+
+// Validates TE header is stripped if it contains an unsupported value
+TEST_P(HeaderIntegrationTest, TestTeHeaderSanitized) {
+  initializeFilter(HeaderMode::Append, false);
+  performRequest(
+      Http::TestHeaderMapImpl{
+          {":method", "GET"},
+          {":path", "/"},
+          {":scheme", "http"},
+          {":authority", "no-headers.com"},
+          {"x-request-foo", "downstram"},
+          {"connection", "te, mike, sam, will, close"},
+          {"te", "gzip"},
+          {"mike", "foo"},
+          {"sam", "bar"},
+          {"will", "baz"},
+      },
+      Http::TestHeaderMapImpl{
+          {":authority", "no-headers.com"},
+          {":path", "/"},
+          {":method", "GET"},
+          {"x-request-foo", "downstram"},
+      },
+      Http::TestHeaderMapImpl{
+          {"server", "envoy"},
+          {"content-length", "0"},
+          {":status", "200"},
+          {"x-return-foo", "upstream"},
+      },
+      Http::TestHeaderMapImpl{
+          {"server", "envoy"},
+          {"x-return-foo", "upstream"},
+          {":status", "200"},
+          {"connection", "close"},
       });
 }
 } // namespace Envoy

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "envoy/api/v2/core/base.pb.h"
+#include "envoy/api/v2/core/grpc_service.pb.h"
 #include "envoy/grpc/async_client.h"
 
 #include "common/common/linked_object.h"
@@ -23,9 +25,10 @@ public:
   AsyncRequest* sendRaw(absl::string_view service_full_name, absl::string_view method_name,
                         Buffer::InstancePtr&& request, RawAsyncRequestCallbacks& callbacks,
                         Tracing::Span& parent_span,
-                        const absl::optional<std::chrono::milliseconds>& timeout) override;
+                        const Http::AsyncClient::RequestOptions& options) override;
   RawAsyncStream* startRaw(absl::string_view service_full_name, absl::string_view method_name,
-                           RawAsyncStreamCallbacks& callbacks) override;
+                           RawAsyncStreamCallbacks& callbacks,
+                           const Http::AsyncClient::StreamOptions& options) override;
 
 private:
   Upstream::ClusterManager& cm_;
@@ -45,7 +48,7 @@ class AsyncStreamImpl : public RawAsyncStream,
 public:
   AsyncStreamImpl(AsyncClientImpl& parent, absl::string_view service_full_name,
                   absl::string_view method_name, RawAsyncStreamCallbacks& callbacks,
-                  const absl::optional<std::chrono::milliseconds>& timeout);
+                  const Http::AsyncClient::StreamOptions& options);
 
   virtual void initialize(bool buffer_body_for_retry);
 
@@ -55,6 +58,7 @@ public:
   void onHeaders(Http::HeaderMapPtr&& headers, bool end_stream) override;
   void onData(Buffer::Instance& data, bool end_stream) override;
   void onTrailers(Http::HeaderMapPtr&& trailers) override;
+  void onComplete() override;
   void onReset() override;
 
   // Grpc::AsyncStream
@@ -78,7 +82,7 @@ private:
   std::string service_full_name_;
   std::string method_name_;
   RawAsyncStreamCallbacks& callbacks_;
-  const absl::optional<std::chrono::milliseconds>& timeout_;
+  Http::AsyncClient::StreamOptions options_;
   bool http_reset_{};
   Http::AsyncClient::Stream* stream_{};
   Decoder decoder_;
@@ -93,7 +97,7 @@ public:
   AsyncRequestImpl(AsyncClientImpl& parent, absl::string_view service_full_name,
                    absl::string_view method_name, Buffer::InstancePtr&& request,
                    RawAsyncRequestCallbacks& callbacks, Tracing::Span& parent_span,
-                   const absl::optional<std::chrono::milliseconds>& timeout);
+                   const Http::AsyncClient::RequestOptions& options);
 
   void initialize(bool buffer_body_for_retry) override;
 

@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "envoy/api/v2/rds.pb.h"
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/discovery.pb.h"
 #include "envoy/api/v2/route/route.pb.h"
-#include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
 #include "envoy/config/subscription.h"
 #include "envoy/http/codes.h"
 #include "envoy/local_info/local_info.h"
@@ -26,12 +26,9 @@
 namespace Envoy {
 namespace Router {
 
-// clang-format off
-#define ALL_VHDS_STATS(COUNTER)                                                                     \
+#define ALL_VHDS_STATS(COUNTER)                                                                    \
   COUNTER(config_reload)                                                                           \
   COUNTER(update_empty)
-
-// clang-format on
 
 struct VhdsStats {
   ALL_VHDS_STATS(GENERATE_COUNTER_STRUCT)
@@ -41,9 +38,11 @@ class VhdsSubscription : Envoy::Config::SubscriptionCallbacks,
                          Logger::Loggable<Logger::Id::router> {
 public:
   VhdsSubscription(RouteConfigUpdatePtr& config_update_info,
-                   Server::Configuration::FactoryContext& factory_context,
+                   Server::Configuration::ServerFactoryContext& factory_context,
                    const std::string& stat_prefix,
-                   std::unordered_set<RouteConfigProvider*>& route_config_providers);
+                   std::unordered_set<RouteConfigProvider*>& route_config_providers,
+                   const envoy::api::v2::core::ConfigSource::XdsApiVersion xds_api_version =
+                       envoy::api::v2::core::ConfigSource::AUTO);
   ~VhdsSubscription() override { init_target_.ready(); }
 
   void registerInitTargetWithInitManager(Init::Manager& m) { m.add(init_target_); }
@@ -56,20 +55,20 @@ private:
   }
   void onConfigUpdate(const Protobuf::RepeatedPtrField<envoy::api::v2::Resource>&,
                       const Protobuf::RepeatedPtrField<std::string>&, const std::string&) override;
-  void onConfigUpdateFailed(const EnvoyException* e) override;
+  void onConfigUpdateFailed(Envoy::Config::ConfigUpdateFailureReason reason,
+                            const EnvoyException* e) override;
   std::string resourceName(const ProtobufWkt::Any& resource) override {
-    return MessageUtil::anyConvert<envoy::api::v2::route::VirtualHost>(resource,
-                                                                       validation_visitor_)
-        .name();
+    return MessageUtil::anyConvert<envoy::api::v2::route::VirtualHost>(resource).name();
   }
+  std::string loadTypeUrl();
 
   RouteConfigUpdatePtr& config_update_info_;
-  std::unique_ptr<Envoy::Config::Subscription> subscription_;
-  Init::TargetImpl init_target_;
   Stats::ScopePtr scope_;
   VhdsStats stats_;
+  std::unique_ptr<Envoy::Config::Subscription> subscription_;
+  Init::TargetImpl init_target_;
   std::unordered_set<RouteConfigProvider*>& route_config_providers_;
-  ProtobufMessage::ValidationVisitor& validation_visitor_;
+  envoy::api::v2::core::ConfigSource::XdsApiVersion xds_api_version_;
 };
 
 using VhdsSubscriptionPtr = std::unique_ptr<VhdsSubscription>;

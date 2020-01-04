@@ -86,7 +86,12 @@ envoy_cc_library(
 envoy_basic_cc_library(
     name = "fmt_lib",
     hdrs = ["fmt.h"],
+    external_deps = [
+        "abseil_strings",
+        "fmtlib",
+    ],
     include_prefix = envoy_include_prefix(package_name()),
+    deps = ["//include/envoy/common:base_includes"],
 )
 
 envoy_cc_library(
@@ -106,6 +111,12 @@ envoy_cc_library(
 envoy_cc_library(
     name = "linked_object",
     hdrs = ["linked_object.h"],
+    deps = [":assert_lib"],
+)
+
+envoy_cc_library(
+    name = "mem_block_builder_lib",
+    hdrs = ["mem_block_builder.h"],
     deps = [":assert_lib"],
 )
 
@@ -165,12 +176,25 @@ envoy_cc_library(
     external_deps = ["abseil_optional"],
     deps = [
         ":utility_lib",
+        "//include/envoy/common:matchers_interface",
+        "//source/common/common:regex_lib",
         "//source/common/config:metadata_lib",
         "//source/common/protobuf",
-        "@envoy_api//envoy/type/matcher:metadata_cc",
-        "@envoy_api//envoy/type/matcher:number_cc",
-        "@envoy_api//envoy/type/matcher:string_cc",
-        "@envoy_api//envoy/type/matcher:value_cc",
+        "@envoy_api//envoy/api/v2/core:pkg_cc_proto",
+        "@envoy_api//envoy/type/matcher:pkg_cc_proto",
+    ],
+)
+
+envoy_cc_library(
+    name = "regex_lib",
+    srcs = ["regex.cc"],
+    hdrs = ["regex.h"],
+    deps = [
+        ":assert_lib",
+        "//include/envoy/common:regex_interface",
+        "//source/common/protobuf:utility_lib",
+        "@com_googlesource_code_re2//:re2",
+        "@envoy_api//envoy/type/matcher:pkg_cc_proto",
     ],
 )
 
@@ -210,6 +234,16 @@ envoy_cc_library(
     name = "thread_annotations",
     hdrs = ["thread_annotations.h"],
     external_deps = ["abseil_base"],
+)
+
+envoy_cc_library(
+    name = "thread_synchronizer_lib",
+    srcs = ["thread_synchronizer.cc"],
+    hdrs = ["thread_synchronizer.h"],
+    external_deps = ["abseil_synchronization"],
+    deps = [
+        ":assert_lib",
+    ],
 )
 
 envoy_cc_library(

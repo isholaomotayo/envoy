@@ -1,4 +1,5 @@
-#include <sys/socket.h>
+#include "envoy/api/v2/core/base.pb.h"
+#include "envoy/common/platform.h"
 
 #include "common/network/addr_family_aware_socket_option_impl.h"
 #include "common/network/io_socket_handle_impl.h"
@@ -17,6 +18,7 @@ protected:
         .WillRepeatedly(Invoke([](int domain, int type, int protocol) {
           return Api::SysCallIntResult{::socket(domain, type, protocol), 0};
         }));
+    EXPECT_CALL(os_sys_calls_, close(_)).Times(testing::AnyNumber());
   }
 };
 

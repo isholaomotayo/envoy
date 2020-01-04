@@ -11,8 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "envoy/api/v2/core/base.pb.h"
-#include "envoy/api/v2/endpoint/endpoint.pb.h"
+#include "envoy/api/v2/cds.pb.h"
 #include "envoy/config/typed_metadata.h"
 #include "envoy/event/timer.h"
 #include "envoy/local_info/local_info.h"
@@ -169,7 +168,7 @@ protected:
   ConfigurableClusterFactoryBase(const std::string& name) : ClusterFactoryImplBase(name) {}
 
 private:
-  virtual std::pair<ClusterImplBaseSharedPtr, ThreadAwareLoadBalancerPtr>
+  std::pair<ClusterImplBaseSharedPtr, ThreadAwareLoadBalancerPtr>
   createClusterImpl(const envoy::api::v2::Cluster& cluster, ClusterFactoryContext& context,
                     Server::Configuration::TransportSocketFactoryContext& socket_factory_context,
                     Stats::ScopePtr&& stats_scope) override {
@@ -178,7 +177,8 @@ private:
         cluster.cluster_type().typed_config(), ProtobufWkt::Struct::default_instance(),
         socket_factory_context.messageValidationVisitor(), *config);
     return createClusterWithConfig(cluster,
-                                   MessageUtil::downcastAndValidate<const ConfigProto&>(*config),
+                                   MessageUtil::downcastAndValidate<const ConfigProto&>(
+                                       *config, context.messageValidationVisitor()),
                                    context, socket_factory_context, std::move(stats_scope));
   }
 

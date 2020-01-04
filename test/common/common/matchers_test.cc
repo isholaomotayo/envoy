@@ -1,7 +1,7 @@
 #include "envoy/api/v2/core/base.pb.h"
 #include "envoy/type/matcher/metadata.pb.h"
-#include "envoy/type/matcher/number.pb.h"
 #include "envoy/type/matcher/string.pb.h"
+#include "envoy/type/matcher/value.pb.h"
 
 #include "common/common/matchers.h"
 #include "common/config/metadata.h"
@@ -255,6 +255,15 @@ TEST(MetadataTest, MatchDoubleListValue) {
 
   values->clear_values();
   metadataValue.Clear();
+}
+
+TEST(StringMatcher, SafeRegexValue) {
+  envoy::type::matcher::StringMatcher matcher;
+  matcher.mutable_safe_regex()->mutable_google_re2();
+  matcher.mutable_safe_regex()->set_regex("foo.*");
+  EXPECT_TRUE(Matchers::StringMatcherImpl(matcher).match("foo"));
+  EXPECT_TRUE(Matchers::StringMatcherImpl(matcher).match("foobar"));
+  EXPECT_FALSE(Matchers::StringMatcherImpl(matcher).match("bar"));
 }
 
 TEST(LowerCaseStringMatcher, MatchExactValue) {

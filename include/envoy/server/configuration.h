@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/stats/sink.h"
 #include "envoy/tracing/http_tracer.h"
 #include "envoy/upstream/cluster_manager.h"
@@ -92,6 +93,11 @@ public:
    * @return Network::Address::InstanceConstSharedPtr the server address.
    */
   virtual Network::Address::InstanceConstSharedPtr address() PURE;
+
+  /**
+   * @return Network::Address::OptionsSharedPtr the list of listener socket options.
+   */
+  virtual Network::Socket::OptionsSharedPtr socketOptions() PURE;
 };
 
 /**

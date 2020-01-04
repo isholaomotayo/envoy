@@ -1,5 +1,8 @@
 #include <memory>
 
+#include "envoy/api/v2/cds.pb.h"
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/core/grpc_service.pb.h"
 #include "envoy/api/v2/eds.pb.h"
 #include "envoy/common/exception.h"
 #include "envoy/stats/scope.h"
@@ -186,7 +189,7 @@ TEST_F(SubscriptionFactoryTest, FilesystemSubscription) {
   auto* watcher = new Filesystem::MockWatcher();
   EXPECT_CALL(dispatcher_, createFilesystemWatcher_()).WillOnce(Return(watcher));
   EXPECT_CALL(*watcher, addWatch(test_path, _, _));
-  EXPECT_CALL(callbacks_, onConfigUpdateFailed(_));
+  EXPECT_CALL(callbacks_, onConfigUpdateFailed(_, _));
   subscriptionFromConfigSource(config)->start({"foo"});
 }
 
@@ -226,7 +229,7 @@ TEST_F(SubscriptionFactoryTest, HttpSubscriptionCustomRequestTimeout) {
   EXPECT_CALL(cm_, clusters()).WillOnce(Return(cluster_map));
   EXPECT_CALL(cluster, info()).Times(2);
   EXPECT_CALL(*cluster.info_, addedViaApi());
-  EXPECT_CALL(dispatcher_, createTimer_(_));
+  EXPECT_CALL(dispatcher_, createTimer_(_)).Times(2);
   EXPECT_CALL(cm_, httpAsyncClientForCluster("static_cluster"));
   EXPECT_CALL(
       cm_.async_client_,
@@ -246,7 +249,7 @@ TEST_F(SubscriptionFactoryTest, HttpSubscription) {
   EXPECT_CALL(cm_, clusters()).WillOnce(Return(cluster_map));
   EXPECT_CALL(cluster, info()).Times(2);
   EXPECT_CALL(*cluster.info_, addedViaApi());
-  EXPECT_CALL(dispatcher_, createTimer_(_));
+  EXPECT_CALL(dispatcher_, createTimer_(_)).Times(2);
   EXPECT_CALL(cm_, httpAsyncClientForCluster("static_cluster"));
   EXPECT_CALL(cm_.async_client_, send_(_, _, _))
       .WillOnce(Invoke([this](Http::MessagePtr& request, Http::AsyncClient::Callbacks&,
@@ -301,8 +304,9 @@ TEST_F(SubscriptionFactoryTest, GrpcSubscription) {
         return async_client_factory;
       }));
   EXPECT_CALL(random_, random());
-  EXPECT_CALL(dispatcher_, createTimer_(_));
-  EXPECT_CALL(callbacks_, onConfigUpdateFailed(_));
+  EXPECT_CALL(dispatcher_, createTimer_(_)).Times(2);
+  // onConfigUpdateFailed() should not be called for gRPC stream connection failure
+  EXPECT_CALL(callbacks_, onConfigUpdateFailed(_, _)).Times(0);
   subscriptionFromConfigSource(config)->start({"static_cluster"});
 }
 

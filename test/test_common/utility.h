@@ -8,11 +8,12 @@
 
 #include "envoy/api/api.h"
 #include "envoy/buffer/buffer.h"
-#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/network/address.h"
 #include "envoy/stats/stats.h"
 #include "envoy/stats/store.h"
 #include "envoy/thread/thread.h"
+#include "envoy/type/matcher/string.pb.h"
+#include "envoy/type/percent.pb.h"
 
 #include "common/buffer/buffer_impl.h"
 #include "common/common/c_smart_ptr.h"
@@ -27,15 +28,16 @@
 #include "test/test_common/test_time_system.h"
 #include "test/test_common/thread_factory_for_test.h"
 
+#include "absl/strings/string_view.h"
 #include "absl/time/time.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-using testing::_;
+using testing::_; // NOLINT(misc-unused-using-decls)
 using testing::AssertionFailure;
 using testing::AssertionResult;
 using testing::AssertionSuccess;
-using testing::Invoke;
+using testing::Invoke; //  NOLINT(misc-unused-using-decls)
 
 namespace Envoy {
 
@@ -104,6 +106,19 @@ namespace Envoy {
       return status;                                                                               \
     }                                                                                              \
   } while (false)
+
+// A convenience macro for testing Envoy deprecated features. This will disable the test when
+// tests are built with --define deprecated_features=disabled to avoid the hard-failure mode for
+// deprecated features. Sample usage is:
+//
+// TEST_F(FixtureName, DEPRECATED_FEATURE_TEST(TestName)) {
+// ...
+// }
+#ifndef ENVOY_DISABLE_DEPRECATED_FEATURES
+#define DEPRECATED_FEATURE_TEST(X) X
+#else
+#define DEPRECATED_FEATURE_TEST(X) DISABLED_##X
+#endif
 
 // Random number generator which logs its seed to stderr. To repeat a test run with a non-zero seed
 // one can run the test with --test_arg=--gtest_random_seed=[seed]
@@ -272,6 +287,19 @@ public:
     ASSERT(ignored_field != nullptr, "Field name to ignore not found.");
     differencer.IgnoreField(ignored_field);
     return differencer.Compare(lhs, rhs);
+  }
+
+  /**
+   * Compare two JSON strings serialized from ProtobufWkt::Struct for equality. When two identical
+   * ProtobufWkt::Struct are serialized into JSON strings, the results have the same set of
+   * properties (values), but the positions may be different.
+   *
+   * @param lhs JSON string on LHS.
+   * @param rhs JSON string on RHS.
+   * @return bool indicating whether the JSON strings are equal.
+   */
+  static bool jsonStringEqual(const std::string& lhs, const std::string& rhs) {
+    return protoEqual(jsonToStruct(lhs), jsonToStruct(rhs));
   }
 
   /**
@@ -478,41 +506,45 @@ public:
    * @return bool indicating that passed gauges not matching the omitted regex have a value of 0.
    */
   static bool gaugesZeroed(const std::vector<Stats::GaugeSharedPtr>& gauges);
+  static bool gaugesZeroed(
+      const std::vector<std::pair<absl::string_view, Stats::PrimitiveGaugeReference>>& gauges);
 
   // Strict variants of Protobuf::MessageUtil
   static void loadFromJson(const std::string& json, Protobuf::Message& message) {
-    return MessageUtil::loadFromJson(json, message, ProtobufMessage::getStrictValidationVisitor());
+    MessageUtil::loadFromJson(json, message, ProtobufMessage::getStrictValidationVisitor());
   }
 
   static void loadFromJson(const std::string& json, ProtobufWkt::Struct& message) {
-    return MessageUtil::loadFromJson(json, message);
+    MessageUtil::loadFromJson(json, message);
   }
 
   static void loadFromYaml(const std::string& yaml, Protobuf::Message& message) {
-    return MessageUtil::loadFromYaml(yaml, message, ProtobufMessage::getStrictValidationVisitor());
+    MessageUtil::loadFromYaml(yaml, message, ProtobufMessage::getStrictValidationVisitor());
   }
 
   static void loadFromFile(const std::string& path, Protobuf::Message& message, Api::Api& api) {
-    return MessageUtil::loadFromFile(path, message, ProtobufMessage::getStrictValidationVisitor(),
-                                     api);
+    MessageUtil::loadFromFile(path, message, ProtobufMessage::getStrictValidationVisitor(), api);
   }
 
   template <class MessageType>
   static inline MessageType anyConvert(const ProtobufWkt::Any& message) {
-    return MessageUtil::anyConvert<MessageType>(message,
-                                                ProtobufMessage::getStrictValidationVisitor());
-  }
-
-  template <class MessageType>
-  static void loadFromFileAndValidate(const std::string& path, MessageType& message) {
-    return MessageUtil::loadFromFileAndValidate(path, message,
-                                                ProtobufMessage::getStrictValidationVisitor());
+    return MessageUtil::anyConvert<MessageType>(message);
   }
 
   template <class MessageType>
   static void loadFromYamlAndValidate(const std::string& yaml, MessageType& message) {
-    return MessageUtil::loadFromYamlAndValidate(yaml, message,
-                                                ProtobufMessage::getStrictValidationVisitor());
+    MessageUtil::loadFromYamlAndValidate(yaml, message,
+                                         ProtobufMessage::getStrictValidationVisitor());
+  }
+
+  template <class MessageType> static void validate(const MessageType& message) {
+    MessageUtil::validate(message, ProtobufMessage::getStrictValidationVisitor());
+  }
+
+  template <class MessageType>
+  static const MessageType& downcastAndValidate(const Protobuf::Message& config) {
+    return MessageUtil::downcastAndValidate<MessageType>(
+        config, ProtobufMessage::getStrictValidationVisitor());
   }
 
   static void jsonConvert(const Protobuf::Message& source, Protobuf::Message& dest) {
@@ -521,6 +553,12 @@ public:
     ProtobufWkt::Struct tmp;
     MessageUtil::jsonConvert(source, tmp);
     MessageUtil::jsonConvert(tmp, ProtobufMessage::getStrictValidationVisitor(), dest);
+  }
+
+  static ProtobufWkt::Struct jsonToStruct(const std::string& json) {
+    ProtobufWkt::Struct message;
+    MessageUtil::loadFromJson(json, message);
+    return message;
   }
 };
 
@@ -615,10 +653,12 @@ public:
   using HeaderMapImpl::remove;
   void addCopy(const std::string& key, const std::string& value);
   void remove(const std::string& key);
-  std::string get_(const std::string& key);
-  std::string get_(const LowerCaseString& key);
-  bool has(const std::string& key);
-  bool has(const LowerCaseString& key);
+  std::string get_(const std::string& key) const;
+  std::string get_(const LowerCaseString& key) const;
+  bool has(const std::string& key) const;
+  bool has(const LowerCaseString& key) const;
+
+  void verifyByteSize() override { ASSERT(cached_byte_size_ == byteSizeInternal()); }
 };
 
 // Helper method to create a header map from an initializer list. Useful due to make_unique's
@@ -718,6 +758,20 @@ MATCHER_P(Percent, rhs, "") {
   expected.set_numerator(rhs);
   expected.set_denominator(envoy::type::FractionalPercent::HUNDRED);
   return TestUtility::protoEqual(expected, arg, /*ignore_repeated_field_ordering=*/false);
+}
+
+MATCHER_P(JsonStringEq, expected, "") {
+  const bool equal = TestUtility::jsonStringEqual(arg, expected);
+  if (!equal) {
+    *result_listener << "\n"
+                     << TestUtility::addLeftAndRightPadding("Expected JSON string:") << "\n"
+                     << expected
+                     << TestUtility::addLeftAndRightPadding("is not equal to actual JSON string:")
+                     << "\n"
+                     << arg << TestUtility::addLeftAndRightPadding("") // line full of padding
+                     << "\n";
+  }
+  return equal;
 }
 
 } // namespace Envoy

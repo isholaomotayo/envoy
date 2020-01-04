@@ -1,9 +1,8 @@
 #include "extensions/filters/http/fault/config.h"
 
+#include "envoy/config/filter/http/fault/v2/fault.pb.h"
 #include "envoy/config/filter/http/fault/v2/fault.pb.validate.h"
 #include "envoy/registry/registry.h"
-
-#include "common/config/filter_json.h"
 
 #include "extensions/filters/http/fault/fault_filter.h"
 
@@ -22,19 +21,10 @@ Http::FilterFactoryCb FaultFilterFactory::createFilterFactoryFromProtoTyped(
   };
 }
 
-Http::FilterFactoryCb
-FaultFilterFactory::createFilterFactory(const Json::Object& json_config,
-                                        const std::string& stats_prefix,
-                                        Server::Configuration::FactoryContext& context) {
-  envoy::config::filter::http::fault::v2::HTTPFault proto_config;
-  Config::FilterJson::translateFaultFilter(json_config, proto_config);
-  return createFilterFactoryFromProtoTyped(proto_config, stats_prefix, context);
-}
-
 Router::RouteSpecificFilterConfigConstSharedPtr
 FaultFilterFactory::createRouteSpecificFilterConfigTyped(
     const envoy::config::filter::http::fault::v2::HTTPFault& config,
-    Server::Configuration::FactoryContext&) {
+    Server::Configuration::ServerFactoryContext&, ProtobufMessage::ValidationVisitor&) {
   return std::make_shared<const Fault::FaultSettings>(config);
 }
 

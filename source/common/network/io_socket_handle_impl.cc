@@ -1,7 +1,6 @@
 #include "common/network/io_socket_handle_impl.h"
 
-#include <errno.h>
-
+#include <cerrno>
 #include <iostream>
 
 #include "envoy/buffer/buffer.h"
@@ -27,9 +26,11 @@ IoSocketHandleImpl::~IoSocketHandleImpl() {
 
 Api::IoCallUint64Result IoSocketHandleImpl::close() {
   ASSERT(fd_ != -1);
-  const int rc = ::close(fd_);
+  auto& os_syscalls = Api::OsSysCallsSingleton::get();
+  const auto& result = os_syscalls.close(fd_);
   fd_ = -1;
-  return Api::IoCallUint64Result(rc, Api::IoErrorPtr(nullptr, IoSocketError::deleteIoError));
+  return Api::IoCallUint64Result(result.rc_,
+                                 Api::IoErrorPtr(nullptr, IoSocketError::deleteIoError));
 }
 
 bool IoSocketHandleImpl::isOpen() const { return fd_ != -1; }
@@ -69,17 +70,6 @@ Api::IoCallUint64Result IoSocketHandleImpl::writev(const Buffer::RawSlice* slice
   }
   auto& os_syscalls = Api::OsSysCallsSingleton::get();
   const Api::SysCallSizeResult result = os_syscalls.writev(fd_, iov.begin(), num_slices_to_write);
-  return sysCallResultToIoCallResult(result);
-}
-
-Api::IoCallUint64Result IoSocketHandleImpl::sendto(const Buffer::RawSlice& slice, int flags,
-                                                   const Address::Instance& address) {
-  const auto* address_base = dynamic_cast<const Address::InstanceBase*>(&address);
-  sockaddr* sock_addr = const_cast<sockaddr*>(address_base->sockAddr());
-
-  auto& os_syscalls = Api::OsSysCallsSingleton::get();
-  const Api::SysCallSizeResult result = os_syscalls.sendto(fd_, slice.mem_, slice.len_, flags,
-                                                           sock_addr, address_base->sockAddrLen());
   return sysCallResultToIoCallResult(result);
 }
 

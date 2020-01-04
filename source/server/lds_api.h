@@ -2,6 +2,8 @@
 
 #include <functional>
 
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/discovery.pb.h"
 #include "envoy/api/v2/lds.pb.h"
 #include "envoy/config/subscription.h"
 #include "envoy/config/subscription_factory.h"
@@ -36,10 +38,12 @@ private:
   void onConfigUpdate(const Protobuf::RepeatedPtrField<envoy::api::v2::Resource>& added_resources,
                       const Protobuf::RepeatedPtrField<std::string>& removed_resources,
                       const std::string& system_version_info) override;
-  void onConfigUpdateFailed(const EnvoyException* e) override;
+  void onConfigUpdateFailed(Envoy::Config::ConfigUpdateFailureReason reason,
+                            const EnvoyException* e) override;
   std::string resourceName(const ProtobufWkt::Any& resource) override {
-    return MessageUtil::anyConvert<envoy::api::v2::Listener>(resource, validation_visitor_).name();
+    return MessageUtil::anyConvert<envoy::api::v2::Listener>(resource).name();
   }
+  std::string loadTypeUrl();
 
   std::unique_ptr<Config::Subscription> subscription_;
   std::string system_version_info_;
@@ -48,6 +52,7 @@ private:
   Upstream::ClusterManager& cm_;
   Init::TargetImpl init_target_;
   ProtobufMessage::ValidationVisitor& validation_visitor_;
+  envoy::api::v2::core::ConfigSource::XdsApiVersion xds_api_version_;
 };
 
 } // namespace Server

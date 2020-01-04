@@ -1,5 +1,7 @@
 #include "extensions/filters/network/dubbo_proxy/active_message.h"
 
+#include "common/stats/timespan_impl.h"
+
 #include "extensions/filters/network/dubbo_proxy/app_exception.h"
 #include "extensions/filters/network/dubbo_proxy/conn_manager.h"
 
@@ -33,7 +35,9 @@ void ActiveResponseDecoder::onStreamDecoded(MessageMetadataSharedPtr metadata,
          metadata->message_type() == MessageType::Exception);
   ASSERT(metadata->hasResponseStatus());
 
+  metadata_ = metadata;
   if (applyMessageEncodedFilters(metadata, ctx) != FilterStatus::Continue) {
+    response_status_ = DubboFilters::UpstreamResponseStatus::Complete;
     return;
   }
 
@@ -51,7 +55,6 @@ void ActiveResponseDecoder::onStreamDecoded(MessageMetadataSharedPtr metadata,
     stats_.response_business_exception_.inc();
   }
 
-  metadata_ = metadata;
   switch (metadata->response_status()) {
   case ResponseStatus::Ok:
     stats_.response_success_.inc();
@@ -181,7 +184,7 @@ void ActiveMessageEncoderFilter::continueEncoding() {
 
 // class ActiveMessage
 ActiveMessage::ActiveMessage(ConnectionManager& parent)
-    : parent_(parent), request_timer_(std::make_unique<Stats::Timespan>(
+    : parent_(parent), request_timer_(std::make_unique<Stats::HistogramCompletableTimespanImpl>(
                            parent_.stats().request_time_ms_, parent.time_system())),
       request_id_(-1), stream_id_(parent.random_generator().random()),
       stream_info_(parent.time_system()), pending_stream_decoded_(false),
@@ -195,9 +198,17 @@ ActiveMessage::~ActiveMessage() {
   parent_.stats().request_active_.dec();
   request_timer_->complete();
   for (auto& filter : decoder_filters_) {
+    ENVOY_LOG(debug, "destroy decoder filter");
     filter->handler()->onDestroy();
   }
-  ENVOY_LOG(debug, "ActiveMessage::~ActiveMessage()");
+
+  for (auto& filter : encoder_filters_) {
+    // Do not call on destroy twice for dual registered filters.
+    if (!filter->dual_filter_) {
+      ENVOY_LOG(debug, "destroy encoder filter");
+      filter->handler()->onDestroy();
+    }
+  }
 }
 
 std::list<ActiveMessageEncoderFilterPtr>::iterator
@@ -340,11 +351,7 @@ FilterStatus ActiveMessage::applyEncoderFilters(ActiveMessageEncoderFilter* filt
 }
 
 void ActiveMessage::sendLocalReply(const DubboFilters::DirectResponse& response, bool end_stream) {
-  if (!metadata_) {
-    // If the sendLocalReply function is called before the messageEnd callback,
-    // metadata_ is nullptr, metadata object needs to be created in order to generate a local reply.
-    metadata_ = std::make_shared<MessageMetadata>();
-  }
+  ASSERT(metadata_);
   metadata_->setRequestId(request_id_);
   parent_.sendLocalReply(*metadata_, response, end_stream);
 

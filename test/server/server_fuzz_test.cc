@@ -1,5 +1,8 @@
 #include <fstream>
 
+#include "envoy/api/v2/core/address.pb.h"
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
+
 #include "common/network/address_impl.h"
 #include "common/thread_local/thread_local_impl.h"
 
@@ -37,6 +40,9 @@ makeHermeticPathsAndPorts(Fuzz::PerTestEnvironment& test_env,
   // we lose here. If we don't sanitize here, we get flakes due to port bind conflicts, file
   // conflicts, etc.
   output.clear_admin();
+  // The header_prefix is a write-once then read-only singleton that persists across tests. We clear
+  // this field so that fuzz tests don't fail over multiple iterations.
+  output.clear_header_prefix();
   if (output.has_runtime()) {
     output.mutable_runtime()->set_symlink_root(test_env.temporaryPath(""));
   }
@@ -46,6 +52,11 @@ makeHermeticPathsAndPorts(Fuzz::PerTestEnvironment& test_env,
     }
   }
   for (auto& cluster : *output.mutable_static_resources()->mutable_clusters()) {
+    for (auto& health_check : *cluster.mutable_health_checks()) {
+      // TODO(asraa): QUIC is not enabled in production code yet, so remove references for HTTP3.
+      // Tracked at https://github.com/envoyproxy/envoy/issues/9513.
+      health_check.mutable_http_health_check()->clear_codec_client_type();
+    }
     for (auto& host : *cluster.mutable_hosts()) {
       makePortHermetic(test_env, host);
     }
@@ -67,6 +78,7 @@ DEFINE_PROTO_FUZZER(const envoy::config::bootstrap::v2::Bootstrap& input) {
   ThreadLocal::InstanceImpl thread_local_instance;
   DangerousDeprecatedTestTime test_time;
   Fuzz::PerTestEnvironment test_env;
+  Init::ManagerImpl init_manager{"Server"};
 
   {
     const std::string bootstrap_path = test_env.temporaryPath("bootstrap.pb_text");
@@ -79,7 +91,7 @@ DEFINE_PROTO_FUZZER(const envoy::config::bootstrap::v2::Bootstrap& input) {
   std::unique_ptr<InstanceImpl> server;
   try {
     server = std::make_unique<InstanceImpl>(
-        options, test_time.timeSystem(),
+        init_manager, options, test_time.timeSystem(),
         std::make_shared<Network::Address::Ipv4Instance>("127.0.0.1"), hooks, restart, stats_store,
         fakelock, component_factory, std::make_unique<Runtime::RandomGeneratorImpl>(),
         thread_local_instance, Thread::threadFactoryForTest(), Filesystem::fileSystemForTest(),

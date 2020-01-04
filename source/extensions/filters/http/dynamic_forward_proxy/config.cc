@@ -1,5 +1,8 @@
 #include "extensions/filters/http/dynamic_forward_proxy/config.h"
 
+#include "envoy/config/filter/http/dynamic_forward_proxy/v2alpha/dynamic_forward_proxy.pb.h"
+#include "envoy/config/filter/http/dynamic_forward_proxy/v2alpha/dynamic_forward_proxy.pb.validate.h"
+
 #include "extensions/common/dynamic_forward_proxy/dns_cache_manager_impl.h"
 #include "extensions/filters/http/dynamic_forward_proxy/proxy_filter.h"
 
@@ -18,6 +21,13 @@ Http::FilterFactoryCb DynamicForwardProxyFilterFactory::createFilterFactoryFromP
   return [filter_config](Http::FilterChainFactoryCallbacks& callbacks) -> void {
     callbacks.addStreamDecoderFilter(std::make_shared<ProxyFilter>(filter_config));
   };
+}
+
+Router::RouteSpecificFilterConfigConstSharedPtr
+DynamicForwardProxyFilterFactory::createRouteSpecificFilterConfigTyped(
+    const envoy::config::filter::http::dynamic_forward_proxy::v2alpha::PerRouteConfig& config,
+    Server::Configuration::ServerFactoryContext&, ProtobufMessage::ValidationVisitor&) {
+  return std::make_shared<const ProxyPerRouteConfig>(config);
 }
 
 /**

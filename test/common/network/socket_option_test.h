@@ -1,5 +1,7 @@
 #pragma once
 
+#include "envoy/api/v2/core/base.pb.h"
+
 #include "common/network/address_impl.h"
 #include "common/network/socket_option_impl.h"
 
@@ -13,7 +15,6 @@
 using testing::_;
 using testing::Invoke;
 using testing::NiceMock;
-using testing::Return;
 
 namespace Envoy {
 namespace Network {

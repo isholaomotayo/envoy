@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "envoy/config/filter/http/grpc_http1_reverse_bridge/v2alpha1/config.pb.h"
 #include "envoy/http/filter.h"
 
 #include "common/buffer/buffer_impl.h"
@@ -27,8 +28,12 @@ public:
   // Http::StreamEncoderFilter
   Http::FilterHeadersStatus encodeHeaders(Http::HeaderMap& headers, bool end_stream) override;
   Http::FilterDataStatus encodeData(Buffer::Instance& buffer, bool end_stream) override;
+  Http::FilterTrailersStatus encodeTrailers(Http::HeaderMap& trailers) override;
 
 private:
+  // Prepend the grpc frame into the buffer
+  void buildGrpcFrameHeader(Buffer::Instance& buffer);
+
   const std::string upstream_content_type_;
   const bool withhold_grpc_frames_;
 
@@ -40,6 +45,19 @@ private:
   // buffer we instead maintain our own.
   Buffer::OwnedImpl buffer_{};
 };
+
+class FilterConfigPerRoute : public Router::RouteSpecificFilterConfig {
+public:
+  FilterConfigPerRoute(
+      const envoy::config::filter::http::grpc_http1_reverse_bridge::v2alpha1::FilterConfigPerRoute&
+          config)
+      : disabled_(config.disabled()) {}
+  bool disabled() const { return disabled_; }
+
+private:
+  bool disabled_;
+};
+
 } // namespace GrpcHttp1ReverseBridge
 } // namespace HttpFilters
 } // namespace Extensions

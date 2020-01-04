@@ -6,16 +6,18 @@
 #include <unordered_map>
 
 #include "envoy/api/api.h"
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/discovery.pb.h"
 #include "envoy/common/exception.h"
 #include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/config/subscription.h"
 #include "envoy/init/manager.h"
 #include "envoy/runtime/runtime.h"
-#include "envoy/service/discovery/v2/rtds.pb.validate.h"
+#include "envoy/service/discovery/v2/rtds.pb.h"
 #include "envoy/stats/stats_macros.h"
 #include "envoy/stats/store.h"
 #include "envoy/thread_local/thread_local.h"
-#include "envoy/type/percent.pb.validate.h"
+#include "envoy/type/percent.pb.h"
 #include "envoy/upstream/cluster_manager.h"
 
 #include "common/common/assert.h"
@@ -31,6 +33,7 @@ namespace Envoy {
 namespace Runtime {
 
 bool runtimeFeatureEnabled(absl::string_view feature);
+uint64_t getInteger(absl::string_view feature, uint64_t default_value);
 
 using RuntimeSingleton = ThreadSafeSingleton<Loader>;
 
@@ -91,28 +94,33 @@ public:
                       uint64_t random_value) const override;
   const std::string& get(const std::string& key) const override;
   uint64_t getInteger(const std::string& key, uint64_t default_value) const override;
+  double getDouble(const std::string& key, double default_value) const override;
+  bool getBoolean(absl::string_view key, bool value) const override;
   const std::vector<OverrideLayerConstPtr>& getLayers() const override;
 
   static Entry createEntry(const std::string& value);
   static Entry createEntry(const ProtobufWkt::Value& value);
-
-  // Returns true and sets 'value' to the key if found.
-  // Returns false if the key is not a boolean value.
-  bool getBoolean(absl::string_view key, bool& value) const;
 
 private:
   static void resolveEntryType(Entry& entry) {
     if (parseEntryBooleanValue(entry)) {
       return;
     }
-    if (parseEntryUintValue(entry)) {
+
+    if (parseEntryDoubleValue(entry) && entry.double_value_ >= 0 &&
+        entry.double_value_ <= std::numeric_limits<uint64_t>::max()) {
+      // Valid uint values will always be parseable as doubles, so we assign the value to both the
+      // uint and double fields. In cases where the value is something like "3.1", we will floor the
+      // number by casting it to a uint and assigning the uint value.
+      entry.uint_value_ = entry.double_value_;
       return;
     }
+
     parseEntryFractionalPercentValue(entry);
   }
 
   static bool parseEntryBooleanValue(Entry& entry);
-  static bool parseEntryUintValue(Entry& entry);
+  static bool parseEntryDoubleValue(Entry& entry);
   static void parseEntryFractionalPercentValue(Entry& entry);
 
   const std::vector<OverrideLayerConstPtr> layers_;
@@ -175,8 +183,6 @@ private:
                      Api::Api& api);
 
   const std::string path_;
-  // Maximum recursion depth for walkDirectory().
-  const uint32_t MaxWalkDepth = 16;
   const Filesystem::WatcherPtr watcher_;
 };
 
@@ -205,15 +211,15 @@ struct RtdsSubscription : Config::SubscriptionCallbacks, Logger::Loggable<Logger
                       const Protobuf::RepeatedPtrField<std::string>& removed_resources,
                       const std::string&) override;
 
-  void onConfigUpdateFailed(const EnvoyException* e) override;
+  void onConfigUpdateFailed(Envoy::Config::ConfigUpdateFailureReason reason,
+                            const EnvoyException* e) override;
   std::string resourceName(const ProtobufWkt::Any& resource) override {
-    return MessageUtil::anyConvert<envoy::service::discovery::v2::Runtime>(resource,
-                                                                           validation_visitor_)
-        .name();
+    return MessageUtil::anyConvert<envoy::service::discovery::v2::Runtime>(resource).name();
   }
 
   void start();
   void validateUpdateSize(uint32_t num_resources);
+  std::string loadTypeUrl();
 
   LoaderImpl& parent_;
   const envoy::api::v2::core::ConfigSource config_source_;
@@ -223,6 +229,7 @@ struct RtdsSubscription : Config::SubscriptionCallbacks, Logger::Loggable<Logger
   Init::TargetImpl init_target_;
   ProtobufWkt::Struct proto_;
   ProtobufMessage::ValidationVisitor& validation_visitor_;
+  envoy::api::v2::core::ConfigSource::XdsApiVersion xds_api_version_;
 };
 
 using RtdsSubscriptionPtr = std::unique_ptr<RtdsSubscription>;
@@ -243,7 +250,8 @@ public:
 
   // Runtime::Loader
   void initialize(Upstream::ClusterManager& cm) override;
-  Snapshot& snapshot() override;
+  const Snapshot& snapshot() override;
+  std::shared_ptr<const Snapshot> threadsafeSnapshot() override;
   void mergeValues(const std::unordered_map<std::string, std::string>& values) override;
 
 private:
@@ -265,6 +273,9 @@ private:
   Api::Api& api_;
   std::vector<RtdsSubscriptionPtr> subscriptions_;
   Upstream::ClusterManager* cm_{};
+
+  absl::Mutex snapshot_mutex_;
+  std::shared_ptr<const Snapshot> thread_safe_snapshot_ ABSL_GUARDED_BY(snapshot_mutex_);
 };
 
 } // namespace Runtime

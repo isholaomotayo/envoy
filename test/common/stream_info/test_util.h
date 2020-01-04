@@ -1,5 +1,6 @@
 #pragma once
 
+#include "envoy/api/v2/core/base.pb.h"
 #include "envoy/stream_info/stream_info.h"
 
 #include "common/common/assert.h"
@@ -11,12 +12,10 @@ namespace Envoy {
 
 class TestStreamInfo : public StreamInfo::StreamInfo {
 public:
-  TestStreamInfo() {
-    tm fake_time;
-    memset(&fake_time, 0, sizeof(fake_time));
-    fake_time.tm_year = 99; // tm < 1901-12-13 20:45:52 is not valid on macOS
-    fake_time.tm_mday = 1;
-    start_time_ = std::chrono::system_clock::from_time_t(timegm(&fake_time));
+  TestStreamInfo() : filter_state_(Envoy::StreamInfo::FilterState::LifeSpan::FilterChain) {
+    // Use 1999-01-01 00:00:00 +0
+    time_t fake_time = 915148800;
+    start_time_ = std::chrono::system_clock::from_time_t(fake_time);
 
     MonotonicTime now = timeSystem().monotonicTime();
     start_time_monotonic_ = now;
@@ -49,6 +48,7 @@ public:
   void setResponseFlag(Envoy::StreamInfo::ResponseFlag response_flag) override {
     response_flags_ |= response_flag;
   }
+  uint64_t responseFlags() const override { return response_flags_; }
   void onUpstreamHostSelected(Upstream::HostDescriptionConstSharedPtr host) override {
     upstream_host_ = host;
   }
@@ -85,12 +85,21 @@ public:
     return downstream_remote_address_;
   }
 
-  void setDownstreamSslConnection(const Ssl::ConnectionInfo* connection_info) override {
+  void
+  setDownstreamSslConnection(const Ssl::ConnectionInfoConstSharedPtr& connection_info) override {
     downstream_connection_info_ = connection_info;
   }
 
-  const Ssl::ConnectionInfo* downstreamSslConnection() const override {
+  Ssl::ConnectionInfoConstSharedPtr downstreamSslConnection() const override {
     return downstream_connection_info_;
+  }
+
+  void setUpstreamSslConnection(const Ssl::ConnectionInfoConstSharedPtr& connection_info) override {
+    upstream_connection_info_ = connection_info;
+  }
+
+  Ssl::ConnectionInfoConstSharedPtr upstreamSslConnection() const override {
+    return upstream_connection_info_;
   }
   void setRouteName(absl::string_view route_name) override {
     route_name_ = std::string(route_name);
@@ -182,6 +191,10 @@ public:
     return upstream_transport_failure_reason_;
   }
 
+  void setRequestHeaders(const Http::HeaderMap& headers) override { request_headers_ = &headers; }
+
+  const Http::HeaderMap* getRequestHeaders() const override { return request_headers_; }
+
   Event::TimeSystem& timeSystem() { return test_time_.timeSystem(); }
 
   SystemTime start_time_;
@@ -207,13 +220,15 @@ public:
   Network::Address::InstanceConstSharedPtr downstream_local_address_;
   Network::Address::InstanceConstSharedPtr downstream_direct_remote_address_;
   Network::Address::InstanceConstSharedPtr downstream_remote_address_;
-  const Ssl::ConnectionInfo* downstream_connection_info_{};
+  Ssl::ConnectionInfoConstSharedPtr downstream_connection_info_;
+  Ssl::ConnectionInfoConstSharedPtr upstream_connection_info_;
   const Router::RouteEntry* route_entry_{};
   envoy::api::v2::core::Metadata metadata_{};
-  Envoy::StreamInfo::FilterStateImpl filter_state_{};
+  Envoy::StreamInfo::FilterStateImpl filter_state_;
   Envoy::StreamInfo::UpstreamTiming upstream_timing_;
   std::string requested_server_name_;
   std::string upstream_transport_failure_reason_;
+  const Http::HeaderMap* request_headers_{};
   DangerousDeprecatedTestTime test_time_;
 };
 

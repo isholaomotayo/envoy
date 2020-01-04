@@ -1,7 +1,9 @@
 #include "extensions/filters/network/redis_proxy/config.h"
 
-#include "common/config/filter_json.h"
+#include "envoy/config/filter/network/redis_proxy/v2/redis_proxy.pb.h"
+#include "envoy/config/filter/network/redis_proxy/v2/redis_proxy.pb.validate.h"
 
+#include "extensions/common/redis/cluster_refresh_manager_impl.h"
 #include "extensions/filters/network/common/redis/client_impl.h"
 #include "extensions/filters/network/redis_proxy/command_splitter_impl.h"
 #include "extensions/filters/network/redis_proxy/proxy_filter.h"
@@ -32,6 +34,11 @@ Network::FilterFactoryCb RedisProxyFilterConfigFactory::createFilterFactoryFromP
   ASSERT(!proto_config.stat_prefix().empty());
   ASSERT(proto_config.has_settings());
 
+  Extensions::Common::Redis::ClusterRefreshManagerSharedPtr refresh_manager =
+      Extensions::Common::Redis::getClusterRefreshManager(
+          context.singletonManager(), context.dispatcher(), context.clusterManager(),
+          context.timeSource());
+
   ProxyFilterConfigSharedPtr filter_config(std::make_shared<ProxyFilterConfig>(
       proto_config, context.scope(), context.drainDecision(), context.runtime(), context.api()));
 
@@ -57,15 +64,19 @@ Network::FilterFactoryCb RedisProxyFilterConfigFactory::createFilterFactoryFromP
   }
   addUniqueClusters(unique_clusters, prefix_routes.catch_all_route());
 
+  auto redis_command_stats =
+      Common::Redis::RedisCommandStats::createRedisCommandStats(context.scope().symbolTable());
+
   Upstreams upstreams;
   for (auto& cluster : unique_clusters) {
     Stats::ScopePtr stats_scope =
         context.scope().createScope(fmt::format("cluster.{}.redis_cluster", cluster));
+
     upstreams.emplace(cluster, std::make_shared<ConnPool::InstanceImpl>(
                                    cluster, context.clusterManager(),
                                    Common::Redis::Client::ClientFactoryImpl::instance_,
                                    context.threadLocal(), proto_config.settings(), context.api(),
-                                   std::move(stats_scope)));
+                                   std::move(stats_scope), redis_command_stats, refresh_manager));
   }
 
   auto router =
@@ -81,14 +92,6 @@ Network::FilterFactoryCb RedisProxyFilterConfigFactory::createFilterFactoryFromP
         factory, Common::Redis::EncoderPtr{new Common::Redis::EncoderImpl()}, *splitter,
         filter_config));
   };
-}
-
-Network::FilterFactoryCb
-RedisProxyFilterConfigFactory::createFilterFactory(const Json::Object& json_config,
-                                                   Server::Configuration::FactoryContext& context) {
-  envoy::config::filter::network::redis_proxy::v2::RedisProxy proto_config;
-  Config::FilterJson::translateRedisProxy(json_config, proto_config);
-  return createFilterFactoryFromProtoTyped(proto_config, context);
 }
 
 /**

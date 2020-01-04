@@ -4,6 +4,7 @@
 #include <unordered_map>
 
 #include "envoy/common/time.h"
+#include "envoy/config/filter/http/jwt_authn/v2alpha/config.pb.h"
 
 #include "common/common/logger.h"
 #include "common/config/datasource.h"
@@ -25,7 +26,7 @@ namespace {
 // Default cache expiration time in 5 minutes.
 constexpr int PubkeyCacheExpirationSec = 600;
 
-class JwksDataImpl : public JwksCache::JwksData, public Logger::Loggable<Logger::Id::filter> {
+class JwksDataImpl : public JwksCache::JwksData, public Logger::Loggable<Logger::Id::jwt> {
 public:
   JwksDataImpl(const JwtProvider& jwt_provider, TimeSource& time_source, Api::Api& api)
       : jwt_provider_(jwt_provider), time_source_(time_source) {

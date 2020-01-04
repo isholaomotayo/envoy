@@ -1,5 +1,7 @@
 #include "extensions/filters/http/rbac/config.h"
 
+#include "envoy/config/filter/http/rbac/v2/rbac.pb.h"
+#include "envoy/config/filter/http/rbac/v2/rbac.pb.validate.h"
 #include "envoy/registry/registry.h"
 
 #include "extensions/filters/http/rbac/rbac_filter.h"
@@ -24,7 +26,7 @@ Http::FilterFactoryCb RoleBasedAccessControlFilterConfigFactory::createFilterFac
 Router::RouteSpecificFilterConfigConstSharedPtr
 RoleBasedAccessControlFilterConfigFactory::createRouteSpecificFilterConfigTyped(
     const envoy::config::filter::http::rbac::v2::RBACPerRoute& proto_config,
-    Server::Configuration::FactoryContext&) {
+    Server::Configuration::ServerFactoryContext&, ProtobufMessage::ValidationVisitor&) {
   return std::make_shared<const RoleBasedAccessControlRouteSpecificFilterConfig>(proto_config);
 }
 

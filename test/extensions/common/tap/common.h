@@ -1,3 +1,5 @@
+#include "envoy/data/tap/v2alpha/wrapper.pb.h"
+
 #include "common/protobuf/utility.h"
 
 #include "extensions/common/tap/tap.h"
@@ -37,7 +39,7 @@ namespace Tap {
 class MockPerTapSinkHandleManager : public PerTapSinkHandleManager {
 public:
   MockPerTapSinkHandleManager();
-  ~MockPerTapSinkHandleManager();
+  ~MockPerTapSinkHandleManager() override;
 
   void submitTrace(TraceWrapperPtr&& trace) override { submitTrace_(*trace); }
 
@@ -47,7 +49,7 @@ public:
 class MockMatcher : public Matcher {
 public:
   using Matcher::Matcher;
-  ~MockMatcher();
+  ~MockMatcher() override;
 
   MOCK_CONST_METHOD1(onNewStream, void(MatchStatusVector& statuses));
   MOCK_CONST_METHOD2(onHttpRequestHeaders,

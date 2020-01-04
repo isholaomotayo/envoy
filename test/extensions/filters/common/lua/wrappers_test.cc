@@ -1,3 +1,5 @@
+#include "envoy/api/v2/core/base.pb.h"
+
 #include "common/buffer/buffer_impl.h"
 
 #include "extensions/filters/common/lua/wrappers.h"
@@ -18,7 +20,7 @@ class LuaBufferWrapperTest : public LuaWrappersTestBase<BufferWrapper> {};
 
 class LuaMetadataMapWrapperTest : public LuaWrappersTestBase<MetadataMapWrapper> {
 public:
-  virtual void setup(const std::string& script) {
+  void setup(const std::string& script) override {
     LuaWrappersTestBase<MetadataMapWrapper>::setup(script);
     state_->registerType<MetadataMapIterator>();
   }
@@ -32,9 +34,10 @@ public:
 
 class LuaConnectionWrapperTest : public LuaWrappersTestBase<ConnectionWrapper> {
 public:
-  virtual void setup(const std::string& script) {
+  void setup(const std::string& script) override {
     LuaWrappersTestBase<ConnectionWrapper>::setup(script);
     state_->registerType<SslConnectionWrapper>();
+    ssl_ = std::make_shared<NiceMock<Envoy::Ssl::MockConnectionInfo>>();
   }
 
 protected:
@@ -53,17 +56,17 @@ protected:
     setup(SCRIPT);
 
     // Setup secure connection if required.
-    EXPECT_CALL(Const(connection_), ssl()).WillOnce(Return(secure ? &ssl_ : nullptr));
+    EXPECT_CALL(Const(connection_), ssl()).WillOnce(Return(secure ? ssl_ : nullptr));
 
     ConnectionWrapper::create(coroutine_->luaState(), &connection_);
     EXPECT_CALL(*this, testPrint(secure ? "secure" : "plain"));
-    EXPECT_CALL(Const(connection_), ssl()).WillOnce(Return(secure ? &ssl_ : nullptr));
+    EXPECT_CALL(Const(connection_), ssl()).WillOnce(Return(secure ? ssl_ : nullptr));
     EXPECT_CALL(*this, testPrint(secure ? "userdata" : "nil"));
     start("callMe");
   }
 
   NiceMock<Envoy::Network::MockConnection> connection_;
-  NiceMock<Envoy::Ssl::MockConnectionInfo> ssl_;
+  std::shared_ptr<NiceMock<Envoy::Ssl::MockConnectionInfo>> ssl_;
 };
 
 // Basic buffer wrapper methods test.

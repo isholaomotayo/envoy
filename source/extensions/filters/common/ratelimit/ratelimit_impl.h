@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
+#include "envoy/api/v2/core/grpc_service.pb.h"
 #include "envoy/grpc/async_client.h"
 #include "envoy/grpc/async_client_manager.h"
 #include "envoy/ratelimit/ratelimit.h"
@@ -47,7 +47,7 @@ class GrpcClientImpl : public Client,
 public:
   GrpcClientImpl(Grpc::RawAsyncClientPtr&& async_client,
                  const absl::optional<std::chrono::milliseconds>& timeout);
-  ~GrpcClientImpl();
+  ~GrpcClientImpl() override;
 
   static void createRequest(envoy::service::ratelimit::v2::RateLimitRequest& request,
                             const std::string& domain,

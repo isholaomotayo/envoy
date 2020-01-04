@@ -3,8 +3,12 @@
 #include <regex>
 #include <unordered_map>
 
+#include "envoy/admin/v2alpha/clusters.pb.h"
 #include "envoy/admin/v2alpha/memory.pb.h"
 #include "envoy/admin/v2alpha/server_info.pb.h"
+#include "envoy/api/v2/auth/cert.pb.h"
+#include "envoy/api/v2/core/base.pb.h"
+#include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
 #include "envoy/json/json_object.h"
 #include "envoy/runtime/runtime.h"
 #include "envoy/stats/stats.h"
@@ -14,12 +18,14 @@
 #include "common/profiler/profiler.h"
 #include "common/protobuf/protobuf.h"
 #include "common/protobuf/utility.h"
+#include "common/stats/symbol_table_creator.h"
 #include "common/stats/thread_local_store.h"
 
 #include "server/http/admin.h"
 
 #include "extensions/transport_sockets/tls/context_config_impl.h"
 
+#include "test/mocks/http/mocks.h"
 #include "test/mocks/runtime/mocks.h"
 #include "test/mocks/server/mocks.h"
 #include "test/test_common/environment.h"
@@ -34,6 +40,7 @@
 
 using testing::_;
 using testing::AllOf;
+using testing::EndsWith;
 using testing::Ge;
 using testing::HasSubstr;
 using testing::InSequence;
@@ -44,13 +51,15 @@ using testing::Ref;
 using testing::Return;
 using testing::ReturnPointee;
 using testing::ReturnRef;
+using testing::StartsWith;
 
 namespace Envoy {
 namespace Server {
 
 class AdminStatsTest : public testing::TestWithParam<Network::Address::IpVersion> {
 public:
-  AdminStatsTest() : alloc_(symbol_table_) {
+  AdminStatsTest()
+      : symbol_table_(Stats::SymbolTableCreator::makeSymbolTable()), alloc_(*symbol_table_) {
     store_ = std::make_unique<Stats::ThreadLocalStoreImpl>(alloc_);
     store_->addSink(sink_);
   }
@@ -63,10 +72,10 @@ public:
                                   true /*pretty_print*/);
   }
 
-  Stats::FakeSymbolTableImpl symbol_table_;
+  Stats::SymbolTablePtr symbol_table_;
   NiceMock<Event::MockDispatcher> main_thread_dispatcher_;
   NiceMock<ThreadLocal::MockInstance> tls_;
-  Stats::HeapStatDataAllocator alloc_;
+  Stats::AllocatorImpl alloc_;
   Stats::MockSink sink_;
   std::unique_ptr<Stats::ThreadLocalStoreImpl> store_;
 };
@@ -87,6 +96,17 @@ public:
   Http::TestHeaderMapImpl request_headers_;
 };
 
+// Check default implementations the admin class picks up.
+TEST_P(AdminFilterTest, MiscFunctions) {
+  EXPECT_EQ(false, admin_.preserveExternalRequestId());
+  Http::MockFilterChainFactoryCallbacks mock_filter_chain_factory_callbacks;
+  EXPECT_EQ(false,
+            admin_.createUpgradeFilterChain("", nullptr, mock_filter_chain_factory_callbacks));
+  EXPECT_TRUE(nullptr != admin_.scopedRouteConfigProvider());
+  EXPECT_EQ(Http::ConnectionManagerConfig::HttpConnectionManagerProto::OVERWRITE,
+            admin_.serverHeaderTransformation());
+}
+
 INSTANTIATE_TEST_SUITE_P(IpVersions, AdminStatsTest,
                          testing::ValuesIn(TestEnvironment::getIpVersionsForTest()),
                          TestUtility::ipTestParamsToString);
@@ -95,8 +115,8 @@ TEST_P(AdminStatsTest, StatsAsJson) {
   InSequence s;
   store_->initializeThreading(main_thread_dispatcher_, tls_);
 
-  Stats::Histogram& h1 = store_->histogram("h1");
-  Stats::Histogram& h2 = store_->histogram("h2");
+  Stats::Histogram& h1 = store_->histogram("h1", Stats::Histogram::Unit::Unspecified);
+  Stats::Histogram& h2 = store_->histogram("h2", Stats::Histogram::Unit::Unspecified);
 
   EXPECT_CALL(sink_, onHistogramComplete(Ref(h1), 200));
   h1.recordValue(200);
@@ -233,7 +253,7 @@ TEST_P(AdminStatsTest, StatsAsJson) {
     ]
 })EOF";
 
-  EXPECT_EQ(expected_json, actual_json);
+  EXPECT_THAT(expected_json, JsonStringEq(actual_json));
   store_->shutdownThreading();
 }
 
@@ -241,8 +261,8 @@ TEST_P(AdminStatsTest, UsedOnlyStatsAsJson) {
   InSequence s;
   store_->initializeThreading(main_thread_dispatcher_, tls_);
 
-  Stats::Histogram& h1 = store_->histogram("h1");
-  Stats::Histogram& h2 = store_->histogram("h2");
+  Stats::Histogram& h1 = store_->histogram("h1", Stats::Histogram::Unit::Unspecified);
+  Stats::Histogram& h2 = store_->histogram("h2", Stats::Histogram::Unit::Unspecified);
 
   EXPECT_EQ("h1", h1.name());
   EXPECT_EQ("h2", h2.name());
@@ -331,7 +351,7 @@ TEST_P(AdminStatsTest, UsedOnlyStatsAsJson) {
     ]
 })EOF";
 
-  EXPECT_EQ(expected_json, actual_json);
+  EXPECT_THAT(expected_json, JsonStringEq(actual_json));
   store_->shutdownThreading();
 }
 
@@ -339,8 +359,8 @@ TEST_P(AdminStatsTest, StatsAsJsonFilterString) {
   InSequence s;
   store_->initializeThreading(main_thread_dispatcher_, tls_);
 
-  Stats::Histogram& h1 = store_->histogram("h1");
-  Stats::Histogram& h2 = store_->histogram("h2");
+  Stats::Histogram& h1 = store_->histogram("h1", Stats::Histogram::Unit::Unspecified);
+  Stats::Histogram& h2 = store_->histogram("h2", Stats::Histogram::Unit::Unspecified);
 
   EXPECT_CALL(sink_, onHistogramComplete(Ref(h1), 200));
   h1.recordValue(200);
@@ -431,7 +451,7 @@ TEST_P(AdminStatsTest, StatsAsJsonFilterString) {
     ]
 })EOF";
 
-  EXPECT_EQ(expected_json, actual_json);
+  EXPECT_THAT(expected_json, JsonStringEq(actual_json));
   store_->shutdownThreading();
 }
 
@@ -439,9 +459,12 @@ TEST_P(AdminStatsTest, UsedOnlyStatsAsJsonFilterString) {
   InSequence s;
   store_->initializeThreading(main_thread_dispatcher_, tls_);
 
-  Stats::Histogram& h1 = store_->histogram("h1_matches"); // Will match, be used, and print
-  Stats::Histogram& h2 = store_->histogram("h2_matches"); // Will match but not be used
-  Stats::Histogram& h3 = store_->histogram("h3_not");     // Will be used but not match
+  Stats::Histogram& h1 = store_->histogram(
+      "h1_matches", Stats::Histogram::Unit::Unspecified); // Will match, be used, and print
+  Stats::Histogram& h2 = store_->histogram(
+      "h2_matches", Stats::Histogram::Unit::Unspecified); // Will match but not be used
+  Stats::Histogram& h3 = store_->histogram(
+      "h3_not", Stats::Histogram::Unit::Unspecified); // Will be used but not match
 
   EXPECT_EQ("h1_matches", h1.name());
   EXPECT_EQ("h2_matches", h2.name());
@@ -537,7 +560,7 @@ TEST_P(AdminStatsTest, UsedOnlyStatsAsJsonFilterString) {
     ]
 })EOF";
 
-  EXPECT_EQ(expected_json, actual_json);
+  EXPECT_THAT(expected_json, JsonStringEq(actual_json));
   store_->shutdownThreading();
 }
 
@@ -586,7 +609,7 @@ public:
         admin_(cpu_profile_path_, server_), request_headers_{{":path", "/"}},
         admin_filter_(admin_) {
     admin_.startHttpListener("/dev/null", address_out_path_,
-                             Network::Test::getCanonicalLoopbackAddress(GetParam()),
+                             Network::Test::getCanonicalLoopbackAddress(GetParam()), nullptr,
                              listener_scope_.createScope("listener.admin."));
     EXPECT_EQ(std::chrono::milliseconds(100), admin_.drainTimeout());
     admin_.tracingStats().random_sampling_.inc();
@@ -598,12 +621,12 @@ public:
                          Buffer::Instance& response, absl::string_view method,
                          absl::string_view body = absl::string_view()) {
     if (!body.empty()) {
-      request_headers_.insertContentType().value(
+      request_headers_.setReferenceContentType(
           Http::Headers::get().ContentTypeValues.FormUrlEncoded);
       callbacks_.buffer_ = std::make_unique<Buffer::OwnedImpl>(body);
     }
 
-    request_headers_.insertMethod().value(method.data(), method.size());
+    request_headers_.setMethod(method);
     admin_filter_.decodeHeaders(request_headers_, false);
 
     return admin_.runCallback(path_and_query, response_headers, response, admin_filter_);
@@ -706,12 +729,43 @@ TEST_P(AdminInstanceTest, AdminBadProfiler) {
                                    server_);
   Http::HeaderMapImpl header_map;
   const absl::string_view post = Http::Headers::get().MethodValues.Post;
-  request_headers_.insertMethod().value(post.data(), post.size());
+  request_headers_.setMethod(post);
   admin_filter_.decodeHeaders(request_headers_, false);
   EXPECT_NO_LOGS(EXPECT_EQ(Http::Code::InternalServerError,
                            admin_bad_profile_path.runCallback("/cpuprofiler?enable=y", header_map,
                                                               data, admin_filter_)));
   EXPECT_FALSE(Profiler::Cpu::profilerEnabled());
+}
+
+TEST_P(AdminInstanceTest, StatsInvalidRegex) {
+  Http::HeaderMapImpl header_map;
+  Buffer::OwnedImpl data;
+  EXPECT_LOG_CONTAINS(
+      "error", "Invalid regex: ",
+      EXPECT_EQ(Http::Code::BadRequest, getCallback("/stats?filter=*.test", header_map, data)));
+
+  // Note: depending on the library, the detailed error message might be one of:
+  //   "One of *?+{ was not preceded by a valid regular expression."
+  //   "regex_error"
+  // but we always precede by 'Invalid regex: "'.
+  EXPECT_THAT(data.toString(), StartsWith("Invalid regex: \""));
+  EXPECT_THAT(data.toString(), EndsWith("\"\n"));
+}
+
+TEST_P(AdminInstanceTest, PrometheusStatsInvalidRegex) {
+  Http::HeaderMapImpl header_map;
+  Buffer::OwnedImpl data;
+  EXPECT_LOG_CONTAINS(
+      "error", ": *.ptest",
+      EXPECT_EQ(Http::Code::BadRequest,
+                getCallback("/stats?format=prometheus&filter=*.ptest", header_map, data)));
+
+  // Note: depending on the library, the detailed error message might be one of:
+  //   "One of *?+{ was not preceded by a valid regular expression."
+  //   "regex_error"
+  // but we always precede by 'Invalid regex: "'.
+  EXPECT_THAT(data.toString(), StartsWith("Invalid regex: \""));
+  EXPECT_THAT(data.toString(), EndsWith("\"\n"));
 }
 
 TEST_P(AdminInstanceTest, WriteAddressToFile) {
@@ -727,7 +781,7 @@ TEST_P(AdminInstanceTest, AdminBadAddressOutPath) {
   EXPECT_LOG_CONTAINS(
       "critical", "cannot open admin address output file " + bad_path + " for writing.",
       admin_bad_address_out_path.startHttpListener(
-          "/dev/null", bad_path, Network::Test::getCanonicalLoopbackAddress(GetParam()),
+          "/dev/null", bad_path, Network::Test::getCanonicalLoopbackAddress(GetParam()), nullptr,
           listener_scope_.createScope("listener.admin.")));
   EXPECT_FALSE(std::ifstream(bad_path));
 }
@@ -789,7 +843,7 @@ TEST_P(AdminInstanceTest, EscapeHelpTextWithPunctuation) {
   Http::HeaderMapImpl header_map;
   Buffer::OwnedImpl response;
   EXPECT_EQ(Http::Code::OK, getCallback("/", header_map, response));
-  Http::HeaderString& content_type = header_map.ContentType()->value();
+  const Http::HeaderString& content_type = header_map.ContentType()->value();
   EXPECT_THAT(std::string(content_type.getStringView()), testing::HasSubstr("text/html"));
   EXPECT_EQ(-1, response.search(planets.data(), planets.size(), 0));
   const std::string escaped_planets = "jupiter&gt;saturn&gt;mars";
@@ -881,6 +935,153 @@ TEST_P(AdminInstanceTest, ConfigDumpMaintainsOrder) {
   }
 }
 
+// Test that using the resource query parameter filters the config dump.
+// We add both static and dynamic listener config to the dump, but expect only
+// dynamic in the JSON with ?resource=dynamic_listeners.
+TEST_P(AdminInstanceTest, ConfigDumpFiltersByResource) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto listeners = admin_.getConfigTracker().add("listeners", [] {
+    auto msg = std::make_unique<envoy::admin::v2alpha::ListenersConfigDump>();
+    auto dyn_listener = msg->add_dynamic_listeners();
+    dyn_listener->set_name("foo");
+    auto stat_listener = msg->add_static_listeners();
+    auto listener = stat_listener->mutable_listener();
+    listener->set_name("bar");
+    return msg;
+  });
+  const std::string expected_json = R"EOF({
+ "configs": [
+  {
+   "@type": "type.googleapis.com/envoy.admin.v2alpha.ListenersConfigDump.DynamicListener",
+   "name": "foo"
+  }
+ ]
+}
+)EOF";
+  EXPECT_EQ(Http::Code::OK,
+            getCallback("/config_dump?resource=dynamic_listeners", header_map, response));
+  std::string output = response.toString();
+  EXPECT_EQ(expected_json, output);
+}
+
+// Test that using the mask query parameter filters the config dump.
+// We add both static and dynamic listener config to the dump, but expect only
+// dynamic in the JSON with ?mask=dynamic_listeners.
+TEST_P(AdminInstanceTest, ConfigDumpFiltersByMask) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto listeners = admin_.getConfigTracker().add("listeners", [] {
+    auto msg = std::make_unique<envoy::admin::v2alpha::ListenersConfigDump>();
+    auto dyn_listener = msg->add_dynamic_listeners();
+    dyn_listener->set_name("foo");
+    auto stat_listener = msg->add_static_listeners();
+    auto listener = stat_listener->mutable_listener();
+    listener->set_name("bar");
+    return msg;
+  });
+  const std::string expected_json = R"EOF({
+ "configs": [
+  {
+   "@type": "type.googleapis.com/envoy.admin.v2alpha.ListenersConfigDump",
+   "dynamic_listeners": [
+    {
+     "name": "foo"
+    }
+   ]
+  }
+ ]
+}
+)EOF";
+  EXPECT_EQ(Http::Code::OK,
+            getCallback("/config_dump?mask=dynamic_listeners", header_map, response));
+  std::string output = response.toString();
+  EXPECT_EQ(expected_json, output);
+}
+
+ProtobufTypes::MessagePtr testDumpClustersConfig() {
+  auto msg = std::make_unique<envoy::admin::v2alpha::ClustersConfigDump>();
+  auto static_cluster = msg->add_static_clusters();
+  auto inner_cluster = static_cluster->mutable_cluster();
+  inner_cluster->set_name("foo");
+  inner_cluster->set_drain_connections_on_host_removal(true);
+
+  auto dyn_cluster = msg->add_dynamic_active_clusters();
+  auto inner_dyn_cluster = dyn_cluster->mutable_cluster();
+  inner_dyn_cluster->set_name("bar");
+  return msg;
+}
+
+// Test that when using both resource and mask query parameters the JSON output contains
+// only the desired resource and the fields specified in the mask.
+TEST_P(AdminInstanceTest, ConfigDumpFiltersByResourceAndMask) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto clusters = admin_.getConfigTracker().add("clusters", testDumpClustersConfig);
+  const std::string expected_json = R"EOF({
+ "configs": [
+  {
+   "@type": "type.googleapis.com/envoy.admin.v2alpha.ClustersConfigDump.StaticCluster",
+   "cluster": {
+    "name": "foo"
+   }
+  }
+ ]
+}
+)EOF";
+  EXPECT_EQ(Http::Code::OK, getCallback("/config_dump?resource=static_clusters&mask=cluster.name",
+                                        header_map, response));
+  std::string output = response.toString();
+  EXPECT_EQ(expected_json, output);
+}
+
+// Test that no fields are present in the JSON output if there is no intersection between the fields
+// of the config dump and the fields present in the mask query parameter.
+TEST_P(AdminInstanceTest, ConfigDumpNonExistentMask) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto clusters = admin_.getConfigTracker().add("clusters", testDumpClustersConfig);
+  const std::string expected_json = R"EOF({
+ "configs": [
+  {
+   "@type": "type.googleapis.com/envoy.admin.v2alpha.ClustersConfigDump.StaticCluster"
+  }
+ ]
+}
+)EOF";
+  EXPECT_EQ(Http::Code::OK,
+            getCallback("/config_dump?resource=static_clusters&mask=bad", header_map, response));
+  std::string output = response.toString();
+  EXPECT_EQ(expected_json, output);
+}
+
+// Test that a 404 Not found is returned if a non-existent resource is passed in as the
+// resource query parameter.
+TEST_P(AdminInstanceTest, ConfigDumpNonExistentResource) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto listeners = admin_.getConfigTracker().add("listeners", [] {
+    auto msg = std::make_unique<ProtobufWkt::StringValue>();
+    msg->set_value("listeners_config");
+    return msg;
+  });
+  EXPECT_EQ(Http::Code::NotFound, getCallback("/config_dump?resource=foo", header_map, response));
+}
+
+// Test that a 400 Bad Request is returned if the passed resource query parameter is not a
+// repeated field.
+TEST_P(AdminInstanceTest, ConfigDumpResourceNotRepeated) {
+  Buffer::OwnedImpl response;
+  Http::HeaderMapImpl header_map;
+  auto clusters = admin_.getConfigTracker().add("clusters", [] {
+    auto msg = std::make_unique<envoy::admin::v2alpha::ClustersConfigDump>();
+    msg->set_version_info("foo");
+    return msg;
+  });
+  EXPECT_EQ(Http::Code::BadRequest,
+            getCallback("/config_dump?resource=version_info", header_map, response));
+}
+
 TEST_P(AdminInstanceTest, Memory) {
   Http::HeaderMapImpl header_map;
   Buffer::OwnedImpl response;
@@ -902,8 +1103,8 @@ TEST_P(AdminInstanceTest, ContextThatReturnsNullCertDetails) {
 
   // Setup a context that returns null cert details.
   testing::NiceMock<Server::Configuration::MockTransportSocketFactoryContext> factory_context;
-  Json::ObjectSharedPtr loader = TestEnvironment::jsonLoadFromString("{}");
-  Extensions::TransportSockets::Tls::ClientContextConfigImpl cfg(*loader, factory_context);
+  envoy::api::v2::auth::UpstreamTlsContext config;
+  Extensions::TransportSockets::Tls::ClientContextConfigImpl cfg(config, factory_context);
   Stats::IsolatedStoreImpl store;
   Envoy::Ssl::ClientContextSharedPtr client_ctx(
       server_.sslContextManager().createSslClientContext(store, cfg));
@@ -933,11 +1134,11 @@ TEST_P(AdminInstanceTest, Runtime) {
   Runtime::MockLoader loader;
   auto layer1 = std::make_unique<NiceMock<Runtime::MockOverrideLayer>>();
   auto layer2 = std::make_unique<NiceMock<Runtime::MockOverrideLayer>>();
-  Runtime::Snapshot::EntryMap entries2{{"string_key", {"override", {}, {}, {}}},
-                                       {"extra_key", {"bar", {}, {}, {}}}};
-  Runtime::Snapshot::EntryMap entries1{{"string_key", {"foo", {}, {}, {}}},
-                                       {"int_key", {"1", 1, {}, {}}},
-                                       {"other_key", {"bar", {}, {}, {}}}};
+  Runtime::Snapshot::EntryMap entries2{{"string_key", {"override", {}, {}, {}, {}}},
+                                       {"extra_key", {"bar", {}, {}, {}, {}}}};
+  Runtime::Snapshot::EntryMap entries1{{"string_key", {"foo", {}, {}, {}, {}}},
+                                       {"int_key", {"1", 1, {}, {}, {}}},
+                                       {"other_key", {"bar", {}, {}, {}, {}}}};
 
   ON_CALL(*layer1, name()).WillByDefault(testing::ReturnRefOfCopy(std::string{"layer1"}));
   ON_CALL(*layer1, values()).WillByDefault(testing::ReturnRef(entries1));
@@ -989,7 +1190,7 @@ TEST_P(AdminInstanceTest, Runtime) {
   EXPECT_CALL(loader, snapshot()).WillRepeatedly(testing::ReturnPointee(&snapshot));
   EXPECT_CALL(server_, runtime()).WillRepeatedly(testing::ReturnPointee(&loader));
   EXPECT_EQ(Http::Code::OK, getCallback("/runtime", header_map, response));
-  EXPECT_EQ(expected_json, response.toString());
+  EXPECT_THAT(expected_json, JsonStringEq(response.toString()));
 }
 
 TEST_P(AdminInstanceTest, RuntimeModify) {
@@ -1077,14 +1278,27 @@ TEST_P(AdminInstanceTest, ClustersJson) {
   ON_CALL(*host, hostname()).WillByDefault(ReturnRef(hostname));
 
   // Add stats in random order and validate that they come in order.
-  Stats::IsolatedStoreImpl store;
-  store.counter("test_counter").add(10);
-  store.counter("rest_counter").add(10);
-  store.counter("arest_counter").add(5);
-  store.gauge("test_gauge", Stats::Gauge::ImportMode::Accumulate).set(11);
-  store.gauge("atest_gauge", Stats::Gauge::ImportMode::Accumulate).set(10);
-  ON_CALL(*host, gauges()).WillByDefault(Invoke([&store]() { return store.gauges(); }));
-  ON_CALL(*host, counters()).WillByDefault(Invoke([&store]() { return store.counters(); }));
+  Stats::PrimitiveCounter test_counter;
+  test_counter.add(10);
+  Stats::PrimitiveCounter rest_counter;
+  rest_counter.add(10);
+  Stats::PrimitiveCounter arest_counter;
+  arest_counter.add(5);
+  std::vector<std::pair<absl::string_view, Stats::PrimitiveCounterReference>> counters = {
+      {"arest_counter", arest_counter},
+      {"rest_counter", rest_counter},
+      {"test_counter", test_counter},
+  };
+  Stats::PrimitiveGauge test_gauge;
+  test_gauge.set(11);
+  Stats::PrimitiveGauge atest_gauge;
+  atest_gauge.set(10);
+  std::vector<std::pair<absl::string_view, Stats::PrimitiveGaugeReference>> gauges = {
+      {"atest_gauge", atest_gauge},
+      {"test_gauge", test_gauge},
+  };
+  ON_CALL(*host, counters()).WillByDefault(Invoke([&counters]() { return counters; }));
+  ON_CALL(*host, gauges()).WillByDefault(Invoke([&gauges]() { return gauges; }));
 
   ON_CALL(*host, healthFlagGet(Upstream::Host::HealthFlag::FAILED_ACTIVE_HC))
       .WillByDefault(Return(true));
@@ -1237,6 +1451,7 @@ TEST_P(AdminInstanceTest, GetRequest) {
   }));
   NiceMock<Init::MockManager> initManager;
   ON_CALL(server_, initManager()).WillByDefault(ReturnRef(initManager));
+  ON_CALL(server_.hot_restart_, version()).WillByDefault(Return("foo_version"));
 
   {
     Http::HeaderMapImpl response_headers;
@@ -1252,6 +1467,7 @@ TEST_P(AdminInstanceTest, GetRequest) {
     // values such as timestamps + Envoy version are tricky to test for.
     TestUtility::loadFromJson(body, server_info_proto);
     EXPECT_EQ(server_info_proto.state(), envoy::admin::v2alpha::ServerInfo::LIVE);
+    EXPECT_EQ(server_info_proto.hot_restart_version(), "foo_version");
     EXPECT_EQ(server_info_proto.command_line_options().restart_epoch(), 2);
     EXPECT_EQ(server_info_proto.command_line_options().service_cluster(), "cluster");
   }
@@ -1338,6 +1554,20 @@ TEST_P(AdminInstanceTest, GetRequestJson) {
               HasSubstr("application/json"));
 }
 
+TEST_P(AdminInstanceTest, RecentLookups) {
+  Http::HeaderMapImpl response_headers;
+  std::string body;
+
+  // Recent lookup tracking is disabled by default.
+  EXPECT_EQ(Http::Code::OK, admin_.request("/stats/recentlookups", "GET", response_headers, body));
+  EXPECT_THAT(body, HasSubstr("Lookup tracking is not enabled"));
+  EXPECT_THAT(std::string(response_headers.ContentType()->value().getStringView()),
+              HasSubstr("text/plain"));
+
+  // We can't test RecentLookups in admin unit tests as it doesn't work with a
+  // fake symbol table. However we cover this solidly in integration tests.
+}
+
 TEST_P(AdminInstanceTest, PostRequest) {
   Http::HeaderMapImpl response_headers;
   std::string body;
@@ -1374,15 +1604,16 @@ private:
 
 class PrometheusStatsFormatterTest : public testing::Test {
 protected:
-  PrometheusStatsFormatterTest() : alloc_(symbol_table_) {}
+  PrometheusStatsFormatterTest()
+      : symbol_table_(Stats::SymbolTableCreator::makeSymbolTable()), alloc_(*symbol_table_) {}
 
   void addCounter(const std::string& name, std::vector<Stats::Tag> cluster_tags) {
-    Stats::StatNameManagedStorage storage(name, symbol_table_);
+    Stats::StatNameManagedStorage storage(name, *symbol_table_);
     counters_.push_back(alloc_.makeCounter(storage.statName(), name, cluster_tags));
   }
 
   void addGauge(const std::string& name, std::vector<Stats::Tag> cluster_tags) {
-    Stats::StatNameManagedStorage storage(name, symbol_table_);
+    Stats::StatNameManagedStorage storage(name, *symbol_table_);
     gauges_.push_back(alloc_.makeGauge(storage.statName(), name, cluster_tags,
                                        Stats::Gauge::ImportMode::Accumulate));
   }
@@ -1396,8 +1627,8 @@ protected:
     return MockHistogramSharedPtr(new NiceMock<Stats::MockParentHistogram>());
   }
 
-  Stats::FakeSymbolTableImpl symbol_table_;
-  Stats::HeapStatDataAllocator alloc_;
+  Stats::SymbolTablePtr symbol_table_;
+  Stats::AllocatorImpl alloc_;
   std::vector<Stats::CounterSharedPtr> counters_;
   std::vector<Stats::GaugeSharedPtr> gauges_;
   std::vector<Stats::ParentHistogramSharedPtr> histograms_;
@@ -1587,6 +1818,7 @@ TEST_F(PrometheusStatsFormatterTest, OutputWithAllMetricTypes) {
 
   auto histogram1 = makeHistogram();
   histogram1->name_ = "cluster.test_1.upstream_rq_time";
+  histogram1->unit_ = Stats::Histogram::Unit::Milliseconds;
   histogram1->used_ = true;
   histogram1->setTags({Stats::Tag{"key1", "value1"}, Stats::Tag{"key2", "value2"}});
   addHistogram(histogram1);
@@ -1647,6 +1879,7 @@ TEST_F(PrometheusStatsFormatterTest, OutputWithUsedOnly) {
 
   auto histogram1 = makeHistogram();
   histogram1->name_ = "cluster.test_1.upstream_rq_time";
+  histogram1->unit_ = Stats::Histogram::Unit::Milliseconds;
   histogram1->used_ = true;
   histogram1->setTags({Stats::Tag{"key1", "value1"}, Stats::Tag{"key2", "value2"}});
   addHistogram(histogram1);
@@ -1694,6 +1927,7 @@ TEST_F(PrometheusStatsFormatterTest, OutputWithUsedOnlyHistogram) {
 
   auto histogram1 = makeHistogram();
   histogram1->name_ = "cluster.test_1.upstream_rq_time";
+  histogram1->unit_ = Stats::Histogram::Unit::Milliseconds;
   histogram1->used_ = false;
   histogram1->setTags({Stats::Tag{"key1", "value1"}, Stats::Tag{"key2", "value2"}});
   addHistogram(histogram1);
@@ -1733,6 +1967,7 @@ TEST_F(PrometheusStatsFormatterTest, OutputWithRegexp) {
 
   auto histogram1 = makeHistogram();
   histogram1->name_ = "cluster.test_1.upstream_rq_time";
+  histogram1->unit_ = Stats::Histogram::Unit::Milliseconds;
   histogram1->setTags({Stats::Tag{"key1", "value1"}, Stats::Tag{"key2", "value2"}});
   addHistogram(histogram1);
 

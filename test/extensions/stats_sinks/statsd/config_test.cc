@@ -1,4 +1,5 @@
-#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
+#include "envoy/api/v2/core/address.pb.h"
+#include "envoy/config/metrics/v2/stats.pb.h"
 #include "envoy/network/address.h"
 #include "envoy/registry/registry.h"
 
@@ -17,10 +18,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-using testing::_;
 using testing::NiceMock;
-using testing::Return;
-using testing::ReturnRef;
 
 namespace Envoy {
 namespace Extensions {

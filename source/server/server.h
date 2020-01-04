@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -7,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/event/timer.h"
 #include "envoy/server/drain_manager.h"
 #include "envoy/server/guarddog.h"
@@ -50,6 +52,8 @@ namespace Server {
  */
 #define ALL_SERVER_STATS(COUNTER, GAUGE, HISTOGRAM)                                                \
   COUNTER(debug_assertion_failures)                                                                \
+  COUNTER(dynamic_unknown_fields)                                                                  \
+  COUNTER(static_unknown_fields)                                                                   \
   GAUGE(concurrency, NeverImport)                                                                  \
   GAUGE(days_until_first_cert_expiring, Accumulate)                                                \
   GAUGE(hot_restart_epoch, NeverImport)                                                            \
@@ -58,10 +62,11 @@ namespace Server {
   GAUGE(memory_heap_size, Accumulate)                                                              \
   GAUGE(parent_connections, Accumulate)                                                            \
   GAUGE(state, NeverImport)                                                                        \
+  GAUGE(stats_recent_lookups, NeverImport)                                                         \
   GAUGE(total_connections, Accumulate)                                                             \
   GAUGE(uptime, Accumulate)                                                                        \
   GAUGE(version, NeverImport)                                                                      \
-  HISTOGRAM(initialization_time_ms)
+  HISTOGRAM(initialization_time_ms, Milliseconds)
 
 struct ServerStats {
   ALL_SERVER_STATS(GENERATE_COUNTER_STRUCT, GENERATE_GAUGE_STRUCT, GENERATE_HISTOGRAM_STRUCT)
@@ -139,17 +144,39 @@ private:
   Event::SignalEventPtr sig_hup_;
 };
 
+class ServerFactoryContextImpl : public Configuration::ServerFactoryContext {
+public:
+  explicit ServerFactoryContextImpl(Instance& server)
+      : server_(server), server_scope_(server_.stats().createScope("")) {}
+
+  Upstream::ClusterManager& clusterManager() override { return server_.clusterManager(); }
+  Event::Dispatcher& dispatcher() override { return server_.dispatcher(); }
+  const LocalInfo::LocalInfo& localInfo() const override { return server_.localInfo(); }
+  Envoy::Runtime::RandomGenerator& random() override { return server_.random(); }
+  Envoy::Runtime::Loader& runtime() override { return server_.runtime(); }
+  Stats::Scope& scope() override { return *server_scope_; }
+  Singleton::Manager& singletonManager() override { return server_.singletonManager(); }
+  ThreadLocal::Instance& threadLocal() override { return server_.threadLocal(); }
+  Admin& admin() override { return server_.admin(); }
+  TimeSource& timeSource() override { return api().timeSource(); }
+  Api::Api& api() override { return server_.api(); }
+
+private:
+  Instance& server_;
+  Stats::ScopePtr server_scope_;
+};
+
 /**
  * This is the actual full standalone server which stitches together various common components.
  */
-class InstanceImpl : Logger::Loggable<Logger::Id::main>,
-                     public Instance,
-                     public ServerLifecycleNotifier {
+class InstanceImpl final : Logger::Loggable<Logger::Id::main>,
+                           public Instance,
+                           public ServerLifecycleNotifier {
 public:
   /**
    * @throw EnvoyException if initialization fails.
    */
-  InstanceImpl(const Options& options, Event::TimeSystem& time_system,
+  InstanceImpl(Init::Manager& init_manager, const Options& options, Event::TimeSystem& time_system,
                Network::Address::InstanceConstSharedPtr local_address, ListenerHooks& hooks,
                HotRestart& restarter, Stats::StoreRoot& store,
                Thread::BasicLockable& access_log_lock, ComponentFactory& component_factory,
@@ -192,18 +219,19 @@ public:
   Stats::Store& stats() override { return stats_store_; }
   Grpc::Context& grpcContext() override { return grpc_context_; }
   Http::Context& httpContext() override { return http_context_; }
-  ProcessContext& processContext() override { return *process_context_; }
+  OptProcessContextRef processContext() override { return *process_context_; }
   ThreadLocal::Instance& threadLocal() override { return thread_local_; }
-  const LocalInfo::LocalInfo& localInfo() override { return *local_info_; }
+  const LocalInfo::LocalInfo& localInfo() const override { return *local_info_; }
   TimeSource& timeSource() override { return time_source_; }
+
+  Configuration::ServerFactoryContext& serverFactoryContext() override { return server_context_; }
 
   std::chrono::milliseconds statsFlushInterval() const override {
     return config_.statsFlushInterval();
   }
 
-  ProtobufMessage::ValidationVisitor& messageValidationVisitor() override {
-    return options_.allowUnknownFields() ? ProtobufMessage::getStrictValidationVisitor()
-                                         : ProtobufMessage::getNullValidationVisitor();
+  ProtobufMessage::ValidationContext& messageValidationContext() override {
+    return validation_context_;
   }
 
   // ServerLifecycleNotifier
@@ -215,6 +243,7 @@ private:
   ProtobufTypes::MessagePtr dumpBootstrapConfig();
   void flushStats();
   void flushStatsInternal();
+  void updateServerStats();
   void initialize(const Options& options, Network::Address::InstanceConstSharedPtr local_address,
                   ComponentFactory& component_factory, ListenerHooks& hooks);
   void loadServerFlags(const absl::optional<std::string>& flags_path);
@@ -223,18 +252,24 @@ private:
   void notifyCallbacksForStage(
       Stage stage, Event::PostCb completion_cb = [] {});
 
+  using LifecycleNotifierCallbacks = std::list<StageCallback>;
+  using LifecycleNotifierCompletionCallbacks = std::list<StageCallbackWithCompletion>;
+
   // init_manager_ must come before any member that participates in initialization, and destructed
   // only after referencing members are gone, since initialization continuation can potentially
   // occur at any point during member lifetime. This init manager is populated with LdsApi targets.
-  Init::ManagerImpl init_manager_{"Server"};
+  Init::Manager& init_manager_;
   // secret_manager_ must come before listener_manager_, config_ and dispatcher_, and destructed
   // only after these members can no longer reference it, since:
   // - There may be active filter chains referencing it in listener_manager_.
   // - There may be active clusters referencing it in config_.cluster_manager_.
   // - There may be active connections referencing it.
   std::unique_ptr<Secret::SecretManager> secret_manager_;
+  bool workers_started_;
+  std::atomic<bool> live_;
   bool shutdown_;
   const Options& options_;
+  ProtobufMessage::ProdValidationContextImpl validation_context_;
   TimeSource& time_source_;
   HotRestart& restarter_;
   const time_t start_time_;
@@ -254,6 +289,8 @@ private:
   ProdListenerComponentFactory listener_component_factory_;
   ProdWorkerFactory worker_factory_;
   std::unique_ptr<ListenerManager> listener_manager_;
+  absl::node_hash_map<Stage, LifecycleNotifierCallbacks> stage_callbacks_;
+  absl::node_hash_map<Stage, LifecycleNotifierCompletionCallbacks> stage_completable_callbacks_;
   Configuration::MainImpl config_;
   Network::DnsResolverSharedPtr dns_resolver_;
   Event::TimerPtr stat_flush_timer_;
@@ -281,8 +318,7 @@ private:
   // whenever we have support for histogram merge across hot restarts.
   Stats::TimespanPtr initialization_timer_;
 
-  using LifecycleNotifierCallbacks = std::list<StageCallback>;
-  using LifecycleNotifierCompletionCallbacks = std::list<StageCallbackWithCompletion>;
+  ServerFactoryContextImpl server_context_;
 
   template <class T>
   class LifecycleCallbackHandle : public ServerLifecycleNotifier::Handle, RaiiListElement<T> {
@@ -290,9 +326,6 @@ private:
     LifecycleCallbackHandle(std::list<T>& callbacks, T& callback)
         : RaiiListElement<T>(callbacks, callback) {}
   };
-
-  absl::node_hash_map<Stage, LifecycleNotifierCallbacks> stage_callbacks_;
-  absl::node_hash_map<Stage, LifecycleNotifierCompletionCallbacks> stage_completable_callbacks_;
 };
 
 // Local implementation of Stats::MetricSnapshot used to flush metrics to sinks. We could

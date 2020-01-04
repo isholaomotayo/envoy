@@ -1,6 +1,7 @@
 #include "extensions/filters/network/rbac/rbac_filter.h"
 
 #include "envoy/buffer/buffer.h"
+#include "envoy/config/filter/network/rbac/v2/rbac.pb.h"
 #include "envoy/network/connection.h"
 
 #include "extensions/filters/network/well_known_names.h"
@@ -77,11 +78,10 @@ void RoleBasedAccessControlFilter::setDynamicMetadata(std::string shadow_engine_
 
 EngineResult
 RoleBasedAccessControlFilter::checkEngine(Filters::Common::RBAC::EnforcementMode mode) {
-  const auto& engine = config_->engine(mode);
-  if (engine.has_value()) {
+  const auto engine = config_->engine(mode);
+  if (engine != nullptr) {
     std::string effective_policy_id;
-    if (engine->allowed(callbacks_->connection(),
-                        callbacks_->connection().streamInfo().dynamicMetadata(),
+    if (engine->allowed(callbacks_->connection(), callbacks_->connection().streamInfo(),
                         &effective_policy_id)) {
       if (mode == Filters::Common::RBAC::EnforcementMode::Shadow) {
         ENVOY_LOG(debug, "shadow allowed");

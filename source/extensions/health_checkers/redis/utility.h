@@ -1,6 +1,7 @@
 #pragma once
 
-#include "envoy/api/v2/core/health_check.pb.validate.h"
+#include "envoy/api/v2/core/health_check.pb.h"
+#include "envoy/config/health_checker/redis/v2/redis.pb.h"
 #include "envoy/config/health_checker/redis/v2/redis.pb.validate.h"
 
 #include "common/protobuf/protobuf.h"
@@ -21,7 +22,7 @@ getRedisHealthCheckConfig(const envoy::api::v2::core::HealthCheck& health_check_
   MessageUtil::jsonConvert(health_check_config.custom_health_check().config(), validation_visitor,
                            *config);
   return MessageUtil::downcastAndValidate<const envoy::config::health_checker::redis::v2::Redis&>(
-      *config);
+      *config, validation_visitor);
 }
 
 } // namespace

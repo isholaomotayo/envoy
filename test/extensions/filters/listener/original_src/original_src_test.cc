@@ -1,3 +1,4 @@
+#include "envoy/api/v2/core/base.pb.h"
 #include "envoy/config/filter/listener/original_src/v2alpha1/original_src.pb.h"
 
 #include "common/network/socket_option_impl.h"
@@ -14,7 +15,6 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::Exactly;
 using testing::SaveArg;
 
 namespace Envoy {

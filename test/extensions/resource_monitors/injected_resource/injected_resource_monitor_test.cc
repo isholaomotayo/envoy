@@ -1,3 +1,5 @@
+#include "envoy/config/resource_monitor/injected_resource/v2alpha/injected_resource.pb.h"
+
 #include "common/event/dispatcher_impl.h"
 #include "common/stats/isolated_store_impl.h"
 
@@ -61,7 +63,8 @@ protected:
   std::unique_ptr<InjectedResourceMonitor> createMonitor() {
     envoy::config::resource_monitor::injected_resource::v2alpha::InjectedResourceConfig config;
     config.set_filename(resource_filename_);
-    Server::Configuration::ResourceMonitorFactoryContextImpl context(*dispatcher_, *api_);
+    Server::Configuration::ResourceMonitorFactoryContextImpl context(
+        *dispatcher_, *api_, ProtobufMessage::getStrictValidationVisitor());
     return std::make_unique<TestableInjectedResourceMonitor>(config, context);
   }
 

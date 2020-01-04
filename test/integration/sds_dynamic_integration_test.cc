@@ -1,8 +1,13 @@
 #include <memory>
 #include <string>
 
+#include "envoy/api/v2/auth/cert.pb.h"
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/discovery.pb.h"
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/service/discovery/v2/sds.pb.h"
 
+#include "common/config/api_version.h"
 #include "common/config/resources.h"
 #include "common/event/dispatcher_impl.h"
 #include "common/network/connection_impl.h"
@@ -27,9 +32,6 @@
 #include "gtest/gtest.h"
 #include "integration.h"
 #include "utility.h"
-
-using testing::NiceMock;
-using testing::Return;
 
 namespace Envoy {
 namespace Ssl {
@@ -72,9 +74,9 @@ protected:
     secret.set_name(server_cert_);
     auto* tls_certificate = secret.mutable_tls_certificate();
     tls_certificate->mutable_certificate_chain()->set_filename(
-        TestEnvironment::runfilesPath("/test/config/integration/certs/servercert.pem"));
+        TestEnvironment::runfilesPath("test/config/integration/certs/servercert.pem"));
     tls_certificate->mutable_private_key()->set_filename(
-        TestEnvironment::runfilesPath("/test/config/integration/certs/serverkey.pem"));
+        TestEnvironment::runfilesPath("test/config/integration/certs/serverkey.pem"));
     return secret;
   }
 
@@ -102,9 +104,9 @@ protected:
     secret.set_name(client_cert_);
     auto* tls_certificate = secret.mutable_tls_certificate();
     tls_certificate->mutable_certificate_chain()->set_filename(
-        TestEnvironment::runfilesPath("/test/config/integration/certs/clientcert.pem"));
+        TestEnvironment::runfilesPath("test/config/integration/certs/clientcert.pem"));
     tls_certificate->mutable_private_key()->set_filename(
-        TestEnvironment::runfilesPath("/test/config/integration/certs/clientkey.pem"));
+        TestEnvironment::runfilesPath("test/config/integration/certs/clientkey.pem"));
     return secret;
   }
 
@@ -116,10 +118,10 @@ protected:
   }
 
   void sendSdsResponse(const envoy::api::v2::auth::Secret& secret) {
-    envoy::api::v2::DiscoveryResponse discovery_response;
+    API_NO_BOOST(envoy::api::v2::DiscoveryResponse) discovery_response;
     discovery_response.set_version_info("1");
     discovery_response.set_type_url(Config::TypeUrl::get().Secret);
-    discovery_response.add_resources()->PackFrom(secret);
+    discovery_response.add_resources()->PackFrom(API_DOWNGRADE(secret));
 
     xds_stream_->sendGrpcMessage(discovery_response);
   }
@@ -141,11 +143,12 @@ class SdsDynamicDownstreamIntegrationTest : public SdsDynamicIntegrationBaseTest
 public:
   void initialize() override {
     config_helper_.addConfigModifier([this](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
-      auto* common_tls_context = bootstrap.mutable_static_resources()
-                                     ->mutable_listeners(0)
-                                     ->mutable_filter_chains(0)
-                                     ->mutable_tls_context()
-                                     ->mutable_common_tls_context();
+      envoy::api::v2::auth::DownstreamTlsContext tls_context;
+      auto* common_tls_context = tls_context.mutable_common_tls_context();
+      auto* transport_socket = bootstrap.mutable_static_resources()
+                                   ->mutable_listeners(0)
+                                   ->mutable_filter_chains(0)
+                                   ->mutable_transport_socket();
       common_tls_context->add_alpn_protocols("http/1.1");
 
       auto* validation_context = common_tls_context->mutable_validation_context();
@@ -156,6 +159,9 @@ public:
       // Modify the listener ssl cert to use SDS from sds_cluster
       auto* secret_config = common_tls_context->add_tls_certificate_sds_secret_configs();
       setUpSdsConfig(secret_config, "server_cert");
+
+      transport_socket->set_name("envoy.transport_sockets.tls");
+      transport_socket->mutable_typed_config()->PackFrom(tls_context);
 
       // Add a static sds cluster
       auto* sds_cluster = bootstrap.mutable_static_resources()->add_clusters();
@@ -239,22 +245,23 @@ TEST_P(SdsDynamicDownstreamIntegrationTest, WrongSecretFirst) {
 
 class SdsDynamicDownstreamCertValidationContextTest : public SdsDynamicDownstreamIntegrationTest {
 public:
-  SdsDynamicDownstreamCertValidationContextTest() : use_combined_validation_context_(false) {}
+  SdsDynamicDownstreamCertValidationContextTest() = default;
 
   void initialize() override {
     config_helper_.addConfigModifier([this](envoy::config::bootstrap::v2::Bootstrap& bootstrap) {
-      auto* common_tls_context = bootstrap.mutable_static_resources()
-                                     ->mutable_listeners(0)
-                                     ->mutable_filter_chains(0)
-                                     ->mutable_tls_context()
-                                     ->mutable_common_tls_context();
+      auto* transport_socket = bootstrap.mutable_static_resources()
+                                   ->mutable_listeners(0)
+                                   ->mutable_filter_chains(0)
+                                   ->mutable_transport_socket();
+      envoy::api::v2::auth::DownstreamTlsContext tls_context;
+      auto* common_tls_context = tls_context.mutable_common_tls_context();
       common_tls_context->add_alpn_protocols("http/1.1");
 
       auto* tls_certificate = common_tls_context->add_tls_certificates();
       tls_certificate->mutable_certificate_chain()->set_filename(
-          TestEnvironment::runfilesPath("/test/config/integration/certs/servercert.pem"));
+          TestEnvironment::runfilesPath("test/config/integration/certs/servercert.pem"));
       tls_certificate->mutable_private_key()->set_filename(
-          TestEnvironment::runfilesPath("/test/config/integration/certs/serverkey.pem"));
+          TestEnvironment::runfilesPath("test/config/integration/certs/serverkey.pem"));
 
       if (use_combined_validation_context_) {
         // Modify the listener context validation type to use combined certificate validation
@@ -270,6 +277,8 @@ public:
         auto* secret_config = common_tls_context->mutable_validation_context_sds_secret_config();
         setUpSdsConfig(secret_config, validation_secret_);
       }
+      transport_socket->set_name("envoy.transport_sockets.tls");
+      transport_socket->mutable_typed_config()->PackFrom(tls_context);
 
       // Add a static sds cluster
       auto* sds_cluster = bootstrap.mutable_static_resources()->add_clusters();
@@ -285,7 +294,7 @@ public:
   void enableCombinedValidationContext(bool enable) { use_combined_validation_context_ = enable; }
 
 private:
-  bool use_combined_validation_context_;
+  bool use_combined_validation_context_{false};
 };
 
 INSTANTIATE_TEST_SUITE_P(IpVersionsClientType, SdsDynamicDownstreamCertValidationContextTest,
@@ -335,13 +344,15 @@ public:
       sds_cluster->mutable_http2_protocol_options();
 
       // change the first cluster with ssl and sds.
-      auto* secret_config = bootstrap.mutable_static_resources()
-                                ->mutable_clusters(0)
-                                ->mutable_tls_context()
-                                ->mutable_common_tls_context()
-                                ->add_tls_certificate_sds_secret_configs();
-
+      auto* transport_socket =
+          bootstrap.mutable_static_resources()->mutable_clusters(0)->mutable_transport_socket();
+      envoy::api::v2::auth::UpstreamTlsContext tls_context;
+      auto* secret_config =
+          tls_context.mutable_common_tls_context()->add_tls_certificate_sds_secret_configs();
       setUpSdsConfig(secret_config, "client_cert");
+
+      transport_socket->set_name("envoy.transport_sockets.tls");
+      transport_socket->mutable_typed_config()->PackFrom(tls_context);
     });
 
     HttpIntegrationTest::initialize();

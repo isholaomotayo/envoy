@@ -88,6 +88,8 @@
   [Google C++ style guide](https://google.github.io/styleguide/cppguide.html#Unnamed_Namespaces_and_Static_Variables)
    allows either, but in Envoy we prefer anonymous namespaces.
 * Braces are required for all control statements include single line if, while, etc. statements.
+* Don't use [mangled Protobuf enum
+  names](https://developers.google.com/protocol-buffers/docs/reference/cpp-generated#enum).
 
 # Error handling
 
@@ -165,7 +167,7 @@ environment. In general, there should be no non-local network access. In additio
 
 * Paths should be constructed using:
   * The methods in [`TestEnvironment`](test/test_common/environment.h) for C++ tests.
-  * With `${TEST_TMPDIR}` (for writable temporary space) or `${TEST_RUNDIR}` for read-only access to
+  * With `${TEST_TMPDIR}` (for writable temporary space) or `${TEST_SRCDIR}` for read-only access to
     test inputs in shell tests.
   * With `{{ test_tmpdir }}`, `{{ test_rundir }}` and `{{ test_udsdir }}` respectively for JSON templates.
     `{{ test_udsdir }}` is provided for pathname based Unix Domain Sockets, which must fit within a

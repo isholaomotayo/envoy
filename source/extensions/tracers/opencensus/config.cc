@@ -1,5 +1,7 @@
 #include "extensions/tracers/opencensus/config.h"
 
+#include "envoy/config/trace/v2/trace.pb.h"
+#include "envoy/config/trace/v2/trace.pb.validate.h"
 #include "envoy/registry/registry.h"
 
 #include "common/tracing/http_tracer_impl.h"
@@ -16,7 +18,7 @@ OpenCensusTracerFactory::OpenCensusTracerFactory() : FactoryBase(TracerNames::ge
 
 Tracing::HttpTracerPtr OpenCensusTracerFactory::createHttpTracerTyped(
     const envoy::config::trace::v2::OpenCensusConfig& proto_config, Server::Instance& server) {
-  Tracing::DriverPtr driver = std::make_unique<Driver>(proto_config);
+  Tracing::DriverPtr driver = std::make_unique<Driver>(proto_config, server.localInfo());
   return std::make_unique<Tracing::HttpTracerImpl>(std::move(driver), server.localInfo());
 }
 

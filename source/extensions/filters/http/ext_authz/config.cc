@@ -3,6 +3,8 @@
 #include <chrono>
 #include <string>
 
+#include "envoy/api/v2/core/grpc_service.pb.h"
+#include "envoy/config/filter/http/ext_authz/v2/ext_authz.pb.h"
 #include "envoy/config/filter/http/ext_authz/v2/ext_authz.pb.validate.h"
 #include "envoy/registry/registry.h"
 
@@ -18,10 +20,11 @@ namespace HttpFilters {
 namespace ExtAuthz {
 
 Http::FilterFactoryCb ExtAuthzFilterConfig::createFilterFactoryFromProtoTyped(
-    const envoy::config::filter::http::ext_authz::v2::ExtAuthz& proto_config, const std::string&,
-    Server::Configuration::FactoryContext& context) {
-  const auto filter_config = std::make_shared<FilterConfig>(
-      proto_config, context.localInfo(), context.scope(), context.runtime(), context.httpContext());
+    const envoy::config::filter::http::ext_authz::v2::ExtAuthz& proto_config,
+    const std::string& stats_prefix, Server::Configuration::FactoryContext& context) {
+  const auto filter_config =
+      std::make_shared<FilterConfig>(proto_config, context.localInfo(), context.scope(),
+                                     context.runtime(), context.httpContext(), stats_prefix);
   Http::FilterFactoryCb callback;
 
   if (proto_config.has_http_service()) {
@@ -34,7 +37,7 @@ Http::FilterFactoryCb ExtAuthzFilterConfig::createFilterFactoryFromProtoTyped(
     callback = [filter_config, client_config,
                 &context](Http::FilterChainFactoryCallbacks& callbacks) {
       auto client = std::make_unique<Extensions::Filters::Common::ExtAuthz::RawHttpClientImpl>(
-          context.clusterManager(), client_config);
+          context.clusterManager(), client_config, context.timeSource());
       callbacks.addStreamDecoderFilter(Http::StreamDecoderFilterSharedPtr{
           std::make_shared<Filter>(filter_config, std::move(client))});
     };
@@ -61,7 +64,7 @@ Http::FilterFactoryCb ExtAuthzFilterConfig::createFilterFactoryFromProtoTyped(
 Router::RouteSpecificFilterConfigConstSharedPtr
 ExtAuthzFilterConfig::createRouteSpecificFilterConfigTyped(
     const envoy::config::filter::http::ext_authz::v2::ExtAuthzPerRoute& proto_config,
-    Server::Configuration::FactoryContext&) {
+    Server::Configuration::ServerFactoryContext&, ProtobufMessage::ValidationVisitor&) {
   return std::make_shared<FilterConfigPerRoute>(proto_config);
 }
 

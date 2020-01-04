@@ -1,3 +1,6 @@
+#include "envoy/config/filter/http/csrf/v2/csrf.pb.h"
+#include "envoy/type/percent.pb.h"
+
 #include "common/http/header_map_impl.h"
 
 #include "extensions/filters/http/csrf/csrf_filter.h"
@@ -11,13 +14,8 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::DoAll;
-using testing::InSequence;
-using testing::Invoke;
 using testing::NiceMock;
 using testing::Return;
-using testing::ReturnRef;
-using testing::SaveArg;
 
 namespace Envoy {
 namespace Extensions {

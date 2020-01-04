@@ -4,7 +4,6 @@
 #include "envoy/local_info/local_info.h"
 #include "envoy/network/connection.h"
 #include "envoy/service/metrics/v2/metrics_service.pb.h"
-#include "envoy/service/metrics/v2/metrics_service.pb.validate.h"
 #include "envoy/singleton/instance.h"
 #include "envoy/stats/histogram.h"
 #include "envoy/stats/sink.h"
@@ -80,7 +79,7 @@ public:
 
   void flushCounter(const Stats::Counter& counter);
   void flushGauge(const Stats::Gauge& gauge);
-  void flushHistogram(const Stats::ParentHistogram& histogram);
+  void flushHistogram(const Stats::ParentHistogram& envoy_histogram);
 
 private:
   GrpcMetricsStreamerSharedPtr grpc_metrics_streamer_;

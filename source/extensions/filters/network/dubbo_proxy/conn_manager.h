@@ -2,7 +2,6 @@
 
 #include "envoy/common/time.h"
 #include "envoy/config/filter/network/dubbo_proxy/v2alpha1/dubbo_proxy.pb.h"
-#include "envoy/config/filter/network/dubbo_proxy/v2alpha1/dubbo_proxy.pb.validate.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/filter.h"
 #include "envoy/stats/scope.h"
@@ -78,6 +77,9 @@ public:
   void deferredMessage(ActiveMessage& message);
   void sendLocalReply(MessageMetadata& metadata, const DubboFilters::DirectResponse& response,
                       bool end_stream);
+
+  // This function is for testing only.
+  std::list<ActiveMessagePtr>& getActiveMessagesForTest() { return active_message_list_; }
 
 private:
   void dispatch();

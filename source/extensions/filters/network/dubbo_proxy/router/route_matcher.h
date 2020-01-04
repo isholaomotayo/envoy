@@ -4,8 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "envoy/config/filter/network/dubbo_proxy/v2alpha1/dubbo_proxy.pb.h"
+#include "envoy/api/v2/route/route.pb.h"
 #include "envoy/config/filter/network/dubbo_proxy/v2alpha1/route.pb.h"
+#include "envoy/type/range.pb.h"
 
 #include "common/common/logger.h"
 #include "common/common/matchers.h"
@@ -30,7 +31,7 @@ class RouteEntryImplBase : public RouteEntry,
                            public Logger::Loggable<Logger::Id::dubbo> {
 public:
   RouteEntryImplBase(const envoy::config::filter::network::dubbo_proxy::v2alpha1::Route& route);
-  virtual ~RouteEntryImplBase() = default;
+  ~RouteEntryImplBase() override = default;
 
   // Router::RouteEntry
   const std::string& clusterName() const override;
@@ -77,7 +78,7 @@ private:
 
   uint64_t total_cluster_weight_;
   const std::string cluster_name_;
-  std::vector<Http::HeaderUtility::HeaderData> config_headers_;
+  const std::vector<Http::HeaderUtility::HeaderDataPtr> config_headers_;
   std::vector<WeightedClusterEntrySharedPtr> weighted_clusters_;
 
   // TODO(gengleilei) Implement it.
@@ -123,14 +124,14 @@ public:
                               uint64_t random_value) const override;
 
 private:
-  const Matchers::StringMatcher method_name_;
+  const Matchers::StringMatcherImpl method_name_;
   std::shared_ptr<ParameterRouteEntryImpl> parameter_route_;
 };
 
-class SignleRouteMatcherImpl : public RouteMatcher, public Logger::Loggable<Logger::Id::dubbo> {
+class SingleRouteMatcherImpl : public RouteMatcher, public Logger::Loggable<Logger::Id::dubbo> {
 public:
   using RouteConfig = envoy::config::filter::network::dubbo_proxy::v2alpha1::RouteConfiguration;
-  SignleRouteMatcherImpl(const RouteConfig& config, Server::Configuration::FactoryContext& context);
+  SingleRouteMatcherImpl(const RouteConfig& config, Server::Configuration::FactoryContext& context);
 
   RouteConstSharedPtr route(const MessageMetadata& metadata, uint64_t random_value) const override;
 

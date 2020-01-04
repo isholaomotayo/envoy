@@ -5,13 +5,20 @@
 #include <string>
 #include <unordered_map>
 
+#include "envoy/api/v2/discovery.pb.h"
+#include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/event/dispatcher.h"
+#include "envoy/service/discovery/v2/rtds.pb.h"
+#include "envoy/service/discovery/v2/rtds.pb.validate.h"
+#include "envoy/service/runtime/v3alpha/rtds.pb.h"
 #include "envoy/thread_local/thread_local.h"
+#include "envoy/type/percent.pb.h"
 #include "envoy/type/percent.pb.validate.h"
 
 #include "common/common/assert.h"
 #include "common/common/fmt.h"
 #include "common/common/utility.h"
+#include "common/config/api_version.h"
 #include "common/filesystem/directory.h"
 #include "common/grpc/common.h"
 #include "common/protobuf/message_validator_impl.h"
@@ -19,19 +26,52 @@
 #include "common/runtime/runtime_features.h"
 
 #include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "openssl/rand.h"
 
 namespace Envoy {
 namespace Runtime {
+namespace {
+
+// Before ASSERTS were added to ensure runtime features were restricted to
+// booleans, several integer features were added. isLegacyFeatures exempts
+// existing integer features from the checks until they can be cleaned up.
+// This includes
+// envoy.reloadable_features.max_[request|response]_headers_count from
+// include/envoy/http/codec.h as well as the http2_protocol_options overrides in
+// source/common/http/http2/codec_impl.cc
+bool isLegacyFeature(absl::string_view feature) {
+  return absl::StartsWith(feature, "envoy.reloadable_features.http2_protocol_options.") ||
+         absl::StartsWith(feature, "envoy.reloadable_features.max_re");
+}
+
+bool isRuntimeFeature(absl::string_view feature) {
+  return RuntimeFeaturesDefaults::get().enabledByDefault(feature) ||
+         RuntimeFeaturesDefaults::get().existsButDisabled(feature);
+}
+
+} // namespace
 
 bool runtimeFeatureEnabled(absl::string_view feature) {
-  ASSERT(absl::StartsWith(feature, "envoy.reloadable_features"));
+  ASSERT(isRuntimeFeature(feature));
   if (Runtime::LoaderSingleton::getExisting()) {
-    return Runtime::LoaderSingleton::getExisting()->snapshot().runtimeFeatureEnabled(feature);
+    return Runtime::LoaderSingleton::getExisting()->threadsafeSnapshot()->runtimeFeatureEnabled(
+        feature);
   }
   ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::runtime), warn,
                       "Unable to use runtime singleton for feature {}", feature);
   return RuntimeFeaturesDefaults::get().enabledByDefault(feature);
+}
+
+uint64_t getInteger(absl::string_view feature, uint64_t default_value) {
+  ASSERT(absl::StartsWith(feature, "envoy.reloadable_features"));
+  if (Runtime::LoaderSingleton::getExisting()) {
+    return Runtime::LoaderSingleton::getExisting()->threadsafeSnapshot()->getInteger(
+        std::string(feature), default_value);
+  }
+  ENVOY_LOG_TO_LOGGER(Envoy::Logger::Registry::getLog(Envoy::Logger::Id::runtime), warn,
+                      "Unable to use runtime singleton for feature {}", feature);
+  return default_value;
 }
 
 const size_t RandomGeneratorImpl::UUID_LENGTH = 36;
@@ -159,32 +199,29 @@ std::string RandomGeneratorImpl::uuid() {
 }
 
 bool SnapshotImpl::deprecatedFeatureEnabled(const std::string& key) const {
-  bool allowed = false;
+  const bool default_allowed = !RuntimeFeaturesDefaults::get().disallowedByDefault(key);
+
   // If the value is not explicitly set as a runtime boolean, the default value is based on
   // disallowedByDefault.
-  if (!getBoolean(key, allowed)) {
-    allowed = !RuntimeFeaturesDefaults::get().disallowedByDefault(key);
-  }
-
-  if (!allowed) {
+  if (!getBoolean(key, default_allowed)) {
     // If either disallowed by default or configured off, the feature is not enabled.
     return false;
   }
+
   // The feature is allowed. It is assumed this check is called when the feature
   // is about to be used, so increment the feature use stat.
   stats_.deprecated_feature_use_.inc();
+#ifdef ENVOY_DISABLE_DEPRECATED_FEATURES
+  return false;
+#endif
+
   return true;
 }
 
 bool SnapshotImpl::runtimeFeatureEnabled(absl::string_view key) const {
-  bool enabled = false;
   // If the value is not explicitly set as a runtime boolean, the default value is based on
-  // disallowedByDefault.
-  if (!getBoolean(key, enabled)) {
-    enabled = RuntimeFeaturesDefaults::get().enabledByDefault(key);
-  }
-
-  return enabled;
+  // enabledByDefault.
+  return getBoolean(key, RuntimeFeaturesDefaults::get().enabledByDefault(key));
 }
 
 bool SnapshotImpl::featureEnabled(const std::string& key, uint64_t default_value,
@@ -210,6 +247,7 @@ bool SnapshotImpl::featureEnabled(const std::string& key, uint64_t default_value
 }
 
 const std::string& SnapshotImpl::get(const std::string& key) const {
+  ASSERT(!isRuntimeFeature(key)); // Make sure runtime guarding is only used for getBoolean
   auto entry = values_.find(key);
   if (entry == values_.end()) {
     return EMPTY_STRING;
@@ -251,6 +289,7 @@ bool SnapshotImpl::featureEnabled(const std::string& key,
 }
 
 uint64_t SnapshotImpl::getInteger(const std::string& key, uint64_t default_value) const {
+  ASSERT(isLegacyFeature(key) || !isRuntimeFeature(key));
   auto entry = values_.find(key);
   if (entry == values_.end() || !entry->second.uint_value_) {
     return default_value;
@@ -259,13 +298,23 @@ uint64_t SnapshotImpl::getInteger(const std::string& key, uint64_t default_value
   }
 }
 
-bool SnapshotImpl::getBoolean(absl::string_view key, bool& value) const {
+double SnapshotImpl::getDouble(const std::string& key, double default_value) const {
+  ASSERT(!isRuntimeFeature(key)); // Make sure runtime guarding is only used for getBoolean
   auto entry = values_.find(key);
-  if (entry != values_.end() && entry->second.bool_value_.has_value()) {
-    value = entry->second.bool_value_.value();
-    return true;
+  if (entry == values_.end() || !entry->second.double_value_) {
+    return default_value;
+  } else {
+    return entry->second.double_value_.value();
   }
-  return false;
+}
+
+bool SnapshotImpl::getBoolean(absl::string_view key, bool default_value) const {
+  auto entry = values_.find(key);
+  if (entry == values_.end() || !entry->second.bool_value_.has_value()) {
+    return default_value;
+  } else {
+    return entry->second.bool_value_.value();
+  }
 }
 
 const std::vector<Snapshot::OverrideLayerConstPtr>& SnapshotImpl::getLayers() const {
@@ -315,10 +364,10 @@ bool SnapshotImpl::parseEntryBooleanValue(Entry& entry) {
   return false;
 }
 
-bool SnapshotImpl::parseEntryUintValue(Entry& entry) {
-  uint64_t converted_uint64;
-  if (absl::SimpleAtoi(entry.raw_string_value_, &converted_uint64)) {
-    entry.uint_value_ = converted_uint64;
+bool SnapshotImpl::parseEntryDoubleValue(Entry& entry) {
+  double converted_double;
+  if (absl::SimpleAtod(entry.raw_string_value_, &converted_double)) {
+    entry.double_value_ = converted_double;
     return true;
   }
   return false;
@@ -358,6 +407,9 @@ DiskLayer::DiskLayer(absl::string_view name, const std::string& path, Api::Api& 
 
 void DiskLayer::walkDirectory(const std::string& path, const std::string& prefix, uint32_t depth,
                               Api::Api& api) {
+  // Maximum recursion depth for walkDirectory().
+  static constexpr uint32_t MaxWalkDepth = 16;
+
   ENVOY_LOG(debug, "walking directory: {}", path);
   if (depth > MaxWalkDepth) {
     throw EnvoyException(fmt::format("Walk recursion depth exceeded {}", MaxWalkDepth));
@@ -462,6 +514,9 @@ LoaderImpl::LoaderImpl(Event::Dispatcher& dispatcher, ThreadLocal::SlotAllocator
       throw EnvoyException(absl::StrCat("Duplicate layer name: ", layer.name()));
     }
     switch (layer.layer_specifier_case()) {
+    case envoy::config::bootstrap::v2::RuntimeLayer::kStaticLayer:
+      // Nothing needs to be done here.
+      break;
     case envoy::config::bootstrap::v2::RuntimeLayer::kAdminLayer:
       if (admin_layer_ != nullptr) {
         throw EnvoyException(
@@ -482,8 +537,7 @@ LoaderImpl::LoaderImpl(Event::Dispatcher& dispatcher, ThreadLocal::SlotAllocator
       init_manager.add(subscriptions_.back()->init_target_);
       break;
     default:
-      ENVOY_LOG(warn, "Skipping unsupported runtime layer: {}", layer.DebugString());
-      break;
+      NOT_REACHED_GCOVR_EXCL_LINE;
     }
   }
 
@@ -498,14 +552,13 @@ RtdsSubscription::RtdsSubscription(
     : parent_(parent), config_source_(rtds_layer.rtds_config()), store_(store),
       resource_name_(rtds_layer.name()),
       init_target_("RTDS " + resource_name_, [this]() { start(); }),
-      validation_visitor_(validation_visitor) {}
+      validation_visitor_(validation_visitor), xds_api_version_(config_source_.xds_api_version()) {}
 
 void RtdsSubscription::onConfigUpdate(const Protobuf::RepeatedPtrField<ProtobufWkt::Any>& resources,
                                       const std::string&) {
   validateUpdateSize(resources.size());
-  auto runtime = MessageUtil::anyConvert<envoy::service::discovery::v2::Runtime>(
-      resources[0], validation_visitor_);
-  MessageUtil::validate(runtime);
+  auto runtime = MessageUtil::anyConvert<envoy::service::discovery::v2::Runtime>(resources[0]);
+  MessageUtil::validate(runtime, validation_visitor_);
   if (runtime.name() != resource_name_) {
     throw EnvoyException(
         fmt::format("Unexpected RTDS runtime (expecting {}): {}", resource_name_, runtime.name()));
@@ -525,7 +578,9 @@ void RtdsSubscription::onConfigUpdate(
   onConfigUpdate(unwrapped_resource, resources[0].version());
 }
 
-void RtdsSubscription::onConfigUpdateFailed(const EnvoyException*) {
+void RtdsSubscription::onConfigUpdateFailed(Envoy::Config::ConfigUpdateFailureReason reason,
+                                            const EnvoyException*) {
+  ASSERT(Envoy::Config::ConfigUpdateFailureReason::ConnectionFailure != reason);
   // We need to allow server startup to continue, even if we have a bad
   // config.
   init_target_.ready();
@@ -536,9 +591,7 @@ void RtdsSubscription::start() {
   // cluster manager resources are not available in the constructor when
   // instantiated in the server instance.
   subscription_ = parent_.cm_->subscriptionFactory().subscriptionFromConfigSource(
-      config_source_,
-      Grpc::Common::typeUrl(envoy::service::discovery::v2::Runtime().GetDescriptor()->full_name()),
-      store_, *this);
+      config_source_, loadTypeUrl(), store_, *this);
   subscription_->start({resource_name_});
 }
 
@@ -550,14 +603,48 @@ void RtdsSubscription::validateUpdateSize(uint32_t num_resources) {
   }
 }
 
-void LoaderImpl::loadNewSnapshot() {
-  ThreadLocal::ThreadLocalObjectSharedPtr ptr = createNewSnapshot();
-  tls_->set([ptr = std::move(ptr)](Event::Dispatcher&) -> ThreadLocal::ThreadLocalObjectSharedPtr {
-    return ptr;
-  });
+std::string RtdsSubscription::loadTypeUrl() {
+  switch (xds_api_version_) {
+  // automatically set api version as V2
+  case envoy::api::v2::core::ConfigSource::AUTO:
+  case envoy::api::v2::core::ConfigSource::V2:
+    return Grpc::Common::typeUrl(
+        API_NO_BOOST(envoy::service::discovery::v2::Runtime().GetDescriptor()->full_name()));
+  case envoy::api::v2::core::ConfigSource::V3ALPHA:
+    return Grpc::Common::typeUrl(
+        API_NO_BOOST(envoy::service::runtime::v3alpha::Runtime().GetDescriptor()->full_name()));
+  default:
+    throw EnvoyException(fmt::format("type {} is not supported", xds_api_version_));
+  }
 }
 
-Snapshot& LoaderImpl::snapshot() { return tls_->getTyped<Snapshot>(); }
+void LoaderImpl::loadNewSnapshot() {
+  std::shared_ptr<SnapshotImpl> ptr = createNewSnapshot();
+  tls_->set([ptr](Event::Dispatcher&) -> ThreadLocal::ThreadLocalObjectSharedPtr {
+    return std::static_pointer_cast<ThreadLocal::ThreadLocalObject>(ptr);
+  });
+
+  {
+    absl::MutexLock lock(&snapshot_mutex_);
+    thread_safe_snapshot_ = ptr;
+  }
+}
+
+const Snapshot& LoaderImpl::snapshot() {
+  ASSERT(tls_->currentThreadRegistered(), "snapshot can only be called from a worker thread");
+  return tls_->getTyped<Snapshot>();
+}
+
+std::shared_ptr<const Snapshot> LoaderImpl::threadsafeSnapshot() {
+  if (tls_->currentThreadRegistered()) {
+    return std::dynamic_pointer_cast<const Snapshot>(tls_->get());
+  }
+
+  {
+    absl::ReaderMutexLock lock(&snapshot_mutex_);
+    return thread_safe_snapshot_;
+  }
+}
 
 void LoaderImpl::mergeValues(const std::unordered_map<std::string, std::string>& values) {
   if (admin_layer_ == nullptr) {

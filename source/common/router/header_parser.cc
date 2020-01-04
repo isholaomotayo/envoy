@@ -1,9 +1,10 @@
 #include "common/router/header_parser.h"
 
-#include <ctype.h>
-
+#include <cctype>
 #include <memory>
 #include <string>
+
+#include "envoy/api/v2/core/base.pb.h"
 
 #include "common/common/assert.h"
 #include "common/http/headers.h"

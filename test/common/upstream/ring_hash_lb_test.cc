@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "envoy/api/v2/cds.pb.h"
 #include "envoy/router/router.h"
 
 #include "common/network/utility.h"
@@ -17,7 +18,6 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
-using testing::_;
 using testing::NiceMock;
 using testing::Return;
 
@@ -46,7 +46,7 @@ public:
   }
 
   // Run all tests against both priority 0 and priority 1 host sets, to ensure
-  // all the load balancers have equivalent functonality for failover host sets.
+  // all the load balancers have equivalent functionality for failover host sets.
   MockHostSet& hostSet() { return GetParam() ? host_set_ : failover_host_set_; }
 
   NiceMock<MockPrioritySet> priority_set_;
@@ -208,8 +208,7 @@ TEST_P(RingHashLoadBalancerTest, BasicWithMurmur2) {
   hostSet().runCallbacks({}, {});
 
   config_ = envoy::api::v2::Cluster::RingHashLbConfig();
-  config_.value().set_hash_function(envoy::api::v2::Cluster_RingHashLbConfig_HashFunction::
-                                        Cluster_RingHashLbConfig_HashFunction_MURMUR_HASH_2);
+  config_.value().set_hash_function(envoy::api::v2::Cluster::RingHashLbConfig::MURMUR_HASH_2);
   config_.value().mutable_minimum_ring_size()->set_value(12);
   init();
   EXPECT_EQ(12, lb_->stats().size_.value());

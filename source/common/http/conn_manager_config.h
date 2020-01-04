@@ -1,9 +1,11 @@
 #pragma once
 
 #include "envoy/config/config_provider.h"
+#include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
 #include "envoy/http/filter.h"
 #include "envoy/router/rds.h"
 #include "envoy/stats/scope.h"
+#include "envoy/type/percent.pb.h"
 
 #include "common/http/date_provider.h"
 #include "common/network/utility.h"
@@ -25,7 +27,9 @@ namespace Http {
   COUNTER(downstream_cx_drain_close)                                                               \
   COUNTER(downstream_cx_http1_total)                                                               \
   COUNTER(downstream_cx_http2_total)                                                               \
+  COUNTER(downstream_cx_http3_total)                                                               \
   COUNTER(downstream_cx_idle_timeout)                                                              \
+  COUNTER(downstream_cx_max_duration_reached)                                                      \
   COUNTER(downstream_cx_overload_disable_keepalive)                                                \
   COUNTER(downstream_cx_protocol_error)                                                            \
   COUNTER(downstream_cx_rx_bytes_total)                                                            \
@@ -43,6 +47,7 @@ namespace Http {
   COUNTER(downstream_rq_completed)                                                                 \
   COUNTER(downstream_rq_http1_total)                                                               \
   COUNTER(downstream_rq_http2_total)                                                               \
+  COUNTER(downstream_rq_http3_total)                                                               \
   COUNTER(downstream_rq_idle_timeout)                                                              \
   COUNTER(downstream_rq_non_relative_path)                                                         \
   COUNTER(downstream_rq_overload_close)                                                            \
@@ -57,13 +62,14 @@ namespace Http {
   GAUGE(downstream_cx_active, Accumulate)                                                          \
   GAUGE(downstream_cx_http1_active, Accumulate)                                                    \
   GAUGE(downstream_cx_http2_active, Accumulate)                                                    \
+  GAUGE(downstream_cx_http3_active, Accumulate)                                                    \
   GAUGE(downstream_cx_rx_bytes_buffered, Accumulate)                                               \
   GAUGE(downstream_cx_ssl_active, Accumulate)                                                      \
   GAUGE(downstream_cx_tx_bytes_buffered, Accumulate)                                               \
   GAUGE(downstream_cx_upgrades_active, Accumulate)                                                 \
   GAUGE(downstream_rq_active, Accumulate)                                                          \
-  HISTOGRAM(downstream_cx_length_ms)                                                               \
-  HISTOGRAM(downstream_rq_time)
+  HISTOGRAM(downstream_cx_length_ms, Milliseconds)                                                 \
+  HISTOGRAM(downstream_rq_time, Milliseconds)
 
 /**
  * Wrapper struct for connection manager stats. @see stats_macros.h
@@ -102,11 +108,12 @@ struct ConnectionManagerTracingStats {
  */
 struct TracingConnectionManagerConfig {
   Tracing::OperationName operation_name_;
-  std::vector<Http::LowerCaseString> request_headers_for_tags_;
+  Tracing::CustomTagMap custom_tags_;
   envoy::type::FractionalPercent client_sampling_;
   envoy::type::FractionalPercent random_sampling_;
   envoy::type::FractionalPercent overall_sampling_;
   bool verbose_;
+  uint32_t max_path_tag_length_;
 };
 
 using TracingConnectionManagerConfigPtr = std::unique_ptr<TracingConnectionManagerConfig>;
@@ -170,6 +177,9 @@ public:
  */
 class ConnectionManagerConfig {
 public:
+  using HttpConnectionManagerProto =
+      envoy::config::filter::network::http_connection_manager::v2::HttpConnectionManager;
+
   virtual ~ConnectionManagerConfig() = default;
 
   /**
@@ -184,15 +194,11 @@ public:
    * @param connection supplies the owning connection.
    * @param data supplies the currently available read data.
    * @param callbacks supplies the callbacks to install into the codec.
-   * @param strict_header_validation indicates whether or not the codec should validate the values
-   * of each HTTP header (NOTE: this argument only affects the H/1.1 codec; the H/2 codec always
-   * does this)
    * @return a codec or nullptr if no codec can be created.
    */
   virtual ServerConnectionPtr createCodec(Network::Connection& connection,
                                           const Buffer::Instance& data,
-                                          ServerConnectionCallbacks& callbacks,
-                                          const bool strict_header_validation) PURE;
+                                          ServerConnectionCallbacks& callbacks) PURE;
 
   /**
    * @return DateProvider& the date provider to use for
@@ -228,9 +234,25 @@ public:
   virtual absl::optional<std::chrono::milliseconds> idleTimeout() const PURE;
 
   /**
+   * @return if the connection manager does routing base on router config, e.g. a Server::Admin impl
+   * has no route config.
+   */
+  virtual bool isRoutable() const PURE;
+
+  /**
+   * @return optional maximum connection duration timeout for manager connections.
+   */
+  virtual absl::optional<std::chrono::milliseconds> maxConnectionDuration() const PURE;
+
+  /**
    * @return maximum request headers size the connection manager will accept.
    */
   virtual uint32_t maxRequestHeadersKb() const PURE;
+
+  /**
+   * @return maximum number of request headers the codecs will accept.
+   */
+  virtual uint32_t maxRequestHeadersCount() const PURE;
 
   /**
    * @return per-stream idle timeout for incoming connection manager connections. Zero indicates a
@@ -268,6 +290,11 @@ public:
    * @return const std::string& the server name to write into responses.
    */
   virtual const std::string& serverName() PURE;
+
+  /**
+   * @return ServerHeaderTransformation the transformation to apply to Server response headers.
+   */
+  virtual HttpConnectionManagerProto::ServerHeaderTransformation serverHeaderTransformation() PURE;
 
   /**
    * @return ConnectionManagerStats& the stats to write to.
@@ -357,6 +384,12 @@ public:
    * @return if the HttpConnectionManager should normalize url following RFC3986
    */
   virtual bool shouldNormalizePath() const PURE;
+
+  /**
+   * @return if the HttpConnectionManager should merge two or more adjacent slashes in the path into
+   * one.
+   */
+  virtual bool shouldMergeSlashes() const PURE;
 };
 } // namespace Http
 } // namespace Envoy

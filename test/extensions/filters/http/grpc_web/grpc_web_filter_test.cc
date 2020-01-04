@@ -106,7 +106,7 @@ public:
               request_headers.GrpcAcceptEncoding()->value().getStringView());
   }
 
-  Envoy::Test::Global<Stats::FakeSymbolTableImpl> symbol_table_;
+  Stats::TestSymbolTable symbol_table_;
   Grpc::ContextImpl grpc_context_;
   GrpcWebFilter filter_;
   NiceMock<Http::MockStreamDecoderFilterCallbacks> decoder_callbacks_;
@@ -355,6 +355,7 @@ TEST_P(GrpcWebFilterTest, Unary) {
     FAIL() << "Unsupported gRPC-Web response content-type: "
            << response_headers.ContentType()->value().getStringView();
   }
+  EXPECT_EQ(0, response_trailers.size());
 }
 
 INSTANTIATE_TEST_SUITE_P(Unary, GrpcWebFilterTest,

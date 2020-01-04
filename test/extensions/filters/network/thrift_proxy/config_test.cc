@@ -1,3 +1,4 @@
+#include "envoy/config/filter/network/thrift_proxy/v2alpha1/thrift_proxy.pb.h"
 #include "envoy/config/filter/network/thrift_proxy/v2alpha1/thrift_proxy.pb.validate.h"
 
 #include "extensions/filters/network/thrift_proxy/config.h"
@@ -56,6 +57,7 @@ public:
   void testConfig(envoy::config::filter::network::thrift_proxy::v2alpha1::ThriftProxy& config) {
     Network::FilterFactoryCb cb;
     EXPECT_NO_THROW({ cb = factory_.createFilterFactoryFromProto(config, context_); });
+    EXPECT_TRUE(factory_.isTerminalFilter());
 
     Network::MockConnection connection;
     EXPECT_CALL(connection, addReadFilter(_));
@@ -161,8 +163,10 @@ route_config:
   name: local_route
 thrift_filters:
   - name: envoy.filters.thrift.mock_filter
-    config:
-      key: value
+    typed_config:
+      "@type": type.googleapis.com/google.protobuf.Struct
+      value:
+        key: value
   - name: envoy.filters.thrift.router
 )EOF";
 

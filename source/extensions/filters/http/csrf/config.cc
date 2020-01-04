@@ -1,5 +1,6 @@
 #include "extensions/filters/http/csrf/config.h"
 
+#include "envoy/config/filter/http/csrf/v2/csrf.pb.h"
 #include "envoy/config/filter/http/csrf/v2/csrf.pb.validate.h"
 #include "envoy/registry/registry.h"
 
@@ -23,7 +24,7 @@ Http::FilterFactoryCb CsrfFilterFactory::createFilterFactoryFromProtoTyped(
 Router::RouteSpecificFilterConfigConstSharedPtr
 CsrfFilterFactory::createRouteSpecificFilterConfigTyped(
     const envoy::config::filter::http::csrf::v2::CsrfPolicy& policy,
-    Server::Configuration::FactoryContext& context) {
+    Server::Configuration::ServerFactoryContext& context, ProtobufMessage::ValidationVisitor&) {
   return std::make_shared<const Csrf::CsrfPolicy>(policy, context.runtime());
 }
 

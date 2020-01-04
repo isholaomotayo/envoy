@@ -20,6 +20,8 @@ public:
   const std::string DubboProxy = "envoy.filters.network.dubbo_proxy";
   // HTTP connection manager filter
   const std::string HttpConnectionManager = "envoy.http_connection_manager";
+  // Local rate limit filter
+  const std::string LocalRateLimit = "envoy.filters.network.local_ratelimit";
   // Mongo proxy filter
   const std::string MongoProxy = "envoy.mongo_proxy";
   // MySQL proxy filter
@@ -28,7 +30,7 @@ public:
   const std::string RateLimit = "envoy.ratelimit";
   // Redis proxy filter
   const std::string RedisProxy = "envoy.redis_proxy";
-  // IP tagging filter
+  // TCP proxy filter
   const std::string TcpProxy = "envoy.tcp_proxy";
   // Authorization filter
   const std::string ExtAuthorization = "envoy.ext_authz";
@@ -40,14 +42,6 @@ public:
   const std::string SniCluster = "envoy.filters.network.sni_cluster";
   // ZooKeeper proxy filter
   const std::string ZooKeeperProxy = "envoy.filters.network.zookeeper_proxy";
-
-  // Converts names from v1 to v2
-  const Config::V1Converter v1_converter_;
-
-  // NOTE: Do not add any new filters to this list. All future filters are v2 only.
-  NetworkFilterNameValues()
-      : v1_converter_({ClientSslAuth, Echo, HttpConnectionManager, MongoProxy, RateLimit,
-                       RedisProxy, TcpProxy, ExtAuthorization}) {}
 };
 
 using NetworkFilterNames = ConstSingleton<NetworkFilterNameValues>;

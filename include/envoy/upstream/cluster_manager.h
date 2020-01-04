@@ -9,6 +9,8 @@
 #include "envoy/access_log/access_log.h"
 #include "envoy/api/api.h"
 #include "envoy/api/v2/cds.pb.h"
+#include "envoy/api/v2/core/address.pb.h"
+#include "envoy/api/v2/core/config_source.pb.h"
 #include "envoy/config/bootstrap/v2/bootstrap.pb.h"
 #include "envoy/config/grpc_mux.h"
 #include "envoy/config/subscription_factory.h"
@@ -135,10 +137,9 @@ public:
    * Can return nullptr if there is no host available in the cluster or if the cluster does not
    * exist.
    */
-  virtual Tcp::ConnectionPool::Instance*
-  tcpConnPoolForCluster(const std::string& cluster, ResourcePriority priority,
-                        LoadBalancerContext* context,
-                        Network::TransportSocketOptionsSharedPtr transport_socket_options) PURE;
+  virtual Tcp::ConnectionPool::Instance* tcpConnPoolForCluster(const std::string& cluster,
+                                                               ResourcePriority priority,
+                                                               LoadBalancerContext* context) PURE;
 
   /**
    * Allocate a load balanced TCP connection for a cluster. The created connection is already
@@ -148,9 +149,8 @@ public:
    * Returns both a connection and the host that backs the connection. Both can be nullptr if there
    * is no host available in the cluster.
    */
-  virtual Host::CreateConnectionData
-  tcpConnForCluster(const std::string& cluster, LoadBalancerContext* context,
-                    Network::TransportSocketOptionsSharedPtr transport_socket_options) PURE;
+  virtual Host::CreateConnectionData tcpConnForCluster(const std::string& cluster,
+                                                       LoadBalancerContext* context) PURE;
 
   /**
    * Returns a client that can be used to make async HTTP calls against the given cluster. The
@@ -180,14 +180,14 @@ public:
   virtual const envoy::api::v2::core::BindConfig& bindConfig() const PURE;
 
   /**
-   * Return a reference to the singleton ADS provider for upstream control plane muxing of xDS. This
-   * is treated somewhat as a special case in ClusterManager, since it does not relate logically to
-   * the management of clusters but instead is required early in ClusterManager/server
+   * Returns a shared_ptr to the singleton xDS-over-gRPC provider for upstream control plane muxing
+   * of xDS. This is treated somewhat as a special case in ClusterManager, since it does not relate
+   * logically to the management of clusters but instead is required early in ClusterManager/server
    * initialization and in various sites that need ClusterManager for xDS API interfacing.
    *
    * @return GrpcMux& ADS API provider referencee.
    */
-  virtual Config::GrpcMux& adsMux() PURE;
+  virtual Config::GrpcMuxSharedPtr adsMux() PURE;
 
   /**
    * @return Grpc::AsyncClientManager& the cluster manager's gRPC client manager.
@@ -197,9 +197,10 @@ public:
   /**
    * Return the local cluster name, if it was configured.
    *
-   * @return std::string the local cluster name, or "" if no local cluster was configured.
+   * @return absl::optional<std::string> the local cluster name, or empty if no local cluster was
+   * configured.
    */
-  virtual const std::string& localClusterName() const PURE;
+  virtual const absl::optional<std::string>& localClusterName() const PURE;
 
   /**
    * This method allows to register callbacks for cluster lifecycle events in the ClusterManager.
@@ -214,6 +215,9 @@ public:
   virtual ClusterUpdateCallbacksHandlePtr
   addThreadLocalClusterUpdateCallbacks(ClusterUpdateCallbacks& callbacks) PURE;
 
+  /**
+   * Return the factory to use for creating cluster manager related objects.
+   */
   virtual ClusterManagerFactory& clusterManagerFactory() PURE;
 
   /**
@@ -223,8 +227,6 @@ public:
    * @return Config::SubscriptionFactory& the subscription factory.
    */
   virtual Config::SubscriptionFactory& subscriptionFactory() PURE;
-
-  virtual std::size_t warmingClusterCount() const PURE;
 };
 
 using ClusterManagerPtr = std::unique_ptr<ClusterManager>;
@@ -275,7 +277,8 @@ public:
   virtual Http::ConnectionPool::InstancePtr
   allocateConnPool(Event::Dispatcher& dispatcher, HostConstSharedPtr host,
                    ResourcePriority priority, Http::Protocol protocol,
-                   const Network::ConnectionSocket::OptionsSharedPtr& options) PURE;
+                   const Network::ConnectionSocket::OptionsSharedPtr& options,
+                   const Network::TransportSocketOptionsSharedPtr& transport_socket_options) PURE;
 
   /**
    * Allocate a TCP connection pool for the host. Pools are separated by 'priority' and

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "envoy/config/transport_socket/tap/v2alpha/tap.pb.h"
-#include "envoy/data/tap/v2alpha/wrapper.pb.h"
 #include "envoy/event/timer.h"
 #include "envoy/network/transport_socket.h"
 
@@ -26,7 +25,7 @@ public:
   Network::IoResult doRead(Buffer::Instance& buffer) override;
   Network::IoResult doWrite(Buffer::Instance& buffer, bool end_stream) override;
   void onConnected() override;
-  const Ssl::ConnectionInfo* ssl() const override;
+  Ssl::ConnectionInfoConstSharedPtr ssl() const override;
 
 private:
   SocketTapConfigSharedPtr config_;

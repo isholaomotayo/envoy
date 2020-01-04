@@ -1,9 +1,11 @@
 #pragma once
 
 #include "envoy/api/api.h"
-#include "envoy/api/v2/core/base.pb.h"
+#include "envoy/api/v2/cds.pb.h"
+#include "envoy/api/v2/core/address.pb.h"
+#include "envoy/api/v2/core/config_source.pb.h"
+#include "envoy/api/v2/eds.pb.h"
 #include "envoy/config/bootstrap/v2/bootstrap.pb.h"
-#include "envoy/config/filter/network/http_connection_manager/v2/http_connection_manager.pb.h"
 #include "envoy/config/grpc_mux.h"
 #include "envoy/config/subscription.h"
 #include "envoy/json/json_object.h"
@@ -16,6 +18,7 @@
 #include "envoy/upstream/cluster_manager.h"
 
 #include "common/common/assert.h"
+#include "common/common/backoff_strategy.h"
 #include "common/common/hash.h"
 #include "common/common/hex.h"
 #include "common/grpc/common.h"
@@ -168,16 +171,6 @@ public:
       const envoy::api::v2::core::ApiConfigSource& api_config_source);
 
   /**
-   * Convert a v1 RDS JSON config to v2 RDS
-   * envoy::config::filter::network::http_connection_manager::v2::Rds.
-   * @param json_rds source v1 RDS JSON config.
-   * @param rds destination v2 RDS envoy::config::filter::network::http_connection_manager::v2::Rds.
-   */
-  static void
-  translateRdsConfig(const Json::Object& json_rds,
-                     envoy::config::filter::network::http_connection_manager::v2::Rds& rds);
-
-  /**
    * Parses RateLimit configuration from envoy::api::v2::core::ApiConfigSource to RateLimitSettings.
    * @param api_config_source ApiConfigSource.
    * @return RateLimitSettings.
@@ -217,6 +210,7 @@ public:
 
   /**
    * Translate a nested config into a proto message provided by the implementation factory.
+   * @param extension_name name of extension corresponding to config.
    * @param enclosing_message proto that contains a field 'config'. Note: the enclosing proto is
    * provided because for statically registered implementations, a custom config is generally
    * optional, which means the conversion must be done conditionally.
@@ -288,9 +282,35 @@ public:
                                     Protobuf::Message& out_proto);
 
   /**
-   * Return whether v1-style JSON filter config loading is allowed via 'deprecated_v1: true'.
+   * Verify any any filter designed to be terminal is configured to be terminal, and vice versa.
+   * @param name the name of the filter.
+   * @param name the type of filter.
+   * @param is_terminal_filter true if the filter is designed to be terminal.
+   * @param last_filter_in_current_config true if the filter is last in the configuration.
+   * @throws EnvoyException if there is a mismatch between design and configuration.
    */
-  static bool allowDeprecatedV1Config(Runtime::Loader& runtime, const Json::Object& config);
+  static void validateTerminalFilters(const std::string& name, const char* filter_type,
+                                      bool is_terminal_filter, bool last_filter_in_current_config) {
+    if (is_terminal_filter && !last_filter_in_current_config) {
+      throw EnvoyException(
+          fmt::format("Error: {} must be the terminal {} filter.", name, filter_type));
+    } else if (!is_terminal_filter && last_filter_in_current_config) {
+      throw EnvoyException(
+          fmt::format("Error: non-terminal filter {} is the last filter in a {} filter chain.",
+                      name, filter_type));
+    }
+  }
+
+  /**
+   * Prepares the DNS failure refresh backoff strategy given the cluster configuration.
+   * @param cluster the cluster configuration.
+   * @param dns_refresh_rate_ms the default DNS refresh rate.
+   * @param random the random generator.
+   * @return BackOffStrategyPtr for scheduling refreshes.
+   */
+  static BackOffStrategyPtr prepareDnsRefreshStrategy(const envoy::api::v2::Cluster& cluster,
+                                                      uint64_t dns_refresh_rate_ms,
+                                                      Runtime::RandomGenerator& random);
 };
 
 } // namespace Config

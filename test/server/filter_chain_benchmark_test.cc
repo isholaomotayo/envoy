@@ -1,6 +1,8 @@
 #include <iostream>
 #include <unordered_map>
 
+#include "envoy/api/v2/lds.pb.h"
+#include "envoy/api/v2/listener/listener.pb.h"
 #include "envoy/network/connection.h"
 #include "envoy/network/listen_socket.h"
 #include "envoy/protobuf/message_validator.h"
@@ -81,11 +83,12 @@ public:
 
   // Dummy method
   void close() override {}
+  bool isOpen() const override { return false; }
   Network::Address::SocketType socketType() const override {
     return Network::Address::SocketType::Stream;
   }
   void setLocalAddress(const Network::Address::InstanceConstSharedPtr&) override {}
-  void restoreLocalAddress(const Network::Address::InstanceConstSharedPtr&) override { return; }
+  void restoreLocalAddress(const Network::Address::InstanceConstSharedPtr&) override {}
   void setRemoteAddress(const Network::Address::InstanceConstSharedPtr&) override {}
   bool localAddressRestored() const override { return true; }
   void setDetectedTransportProtocol(absl::string_view) override {}
@@ -113,45 +116,56 @@ const char YamlHeader[] = R"EOF(
     filter_chains:
     - filter_chain_match:
         # empty
-      tls_context:
-        common_tls_context:
-          tls_certificates:
-            - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_uri_cert.pem" }
-              private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_uri_key.pem" }
-        session_ticket_keys:
-          keys:
-          - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_uri_cert.pem" }
+                private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_uri_key.pem" }
+          session_ticket_keys:
+            keys:
+            - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
 const char YamlSingleServer[] = R"EOF(
     - filter_chain_match:
         server_names: "server1.example.com"
         transport_protocol: "tls"
-      tls_context:
-        common_tls_context:
-          tls_certificates:
-            - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_dns_cert.pem" }
-              private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_dns_key.pem" }
-        session_ticket_keys:
-          keys:
-          - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_dns_cert.pem" }
+                private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_dns_key.pem" }
+          session_ticket_keys:
+            keys:
+            - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
 const char YamlSingleDstPortTop[] = R"EOF(
     - filter_chain_match:
         destination_port: )EOF";
 const char YamlSingleDstPortBottom[] = R"EOF(
-      tls_context:
-        common_tls_context:
-          tls_certificates:
-            - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_multiple_dns_cert.pem" }
-              private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_multiple_dns_key.pem" }
-        session_ticket_keys:
-          keys:
-          - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.api.v2.auth.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_multiple_dns_cert.pem" }
+                private_key: { filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/san_multiple_dns_key.pem" }
+          session_ticket_keys:
+            keys:
+            - filename: "{{ test_rundir }}/test/extensions/transport_sockets/tls/test_data/ticket_key_a")EOF";
 } // namespace
 
 class FilterChainBenchmarkFixture : public benchmark::Fixture {
 public:
-  void SetUp(const ::benchmark::State& state) {
+  using Fixture::SetUp;
+  void SetUp(const ::benchmark::State& state) override {
     int64_t input_size = state.range(0);
     std::vector<std::string> port_chains;
+    port_chains.reserve(input_size);
     for (int i = 0; i < input_size; i++) {
       port_chains.push_back(absl::StrCat(YamlSingleDstPortTop, 10000 + i, YamlSingleDstPortBottom));
     }

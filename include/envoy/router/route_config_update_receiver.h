@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "envoy/api/v2/discovery.pb.h"
+#include "envoy/api/v2/rds.pb.h"
 #include "envoy/common/pure.h"
 #include "envoy/common/time.h"
 #include "envoy/router/rds.h"
@@ -28,6 +30,7 @@ public:
    */
   virtual bool onRdsUpdate(const envoy::api::v2::RouteConfiguration& rc,
                            const std::string& version_info) PURE;
+
   /**
    * Called on updates via VHDS.
    * @param added_resources supplies Resources (each containing a VirtualHost) that have been

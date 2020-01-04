@@ -3,6 +3,8 @@
 #include <sstream>
 #include <string>
 
+#include "envoy/config/trace/v2/trace.pb.h"
+
 #include "common/common/base64.h"
 #include "common/http/header_map_impl.h"
 #include "common/http/headers.h"
@@ -27,7 +29,6 @@
 #include "gtest/gtest.h"
 
 using testing::_;
-using testing::AtLeast;
 using testing::Eq;
 using testing::Invoke;
 using testing::NiceMock;
@@ -48,7 +49,7 @@ public:
 
     if (init_timer) {
       timer_ = new NiceMock<Event::MockTimer>(&tls_.dispatcher_);
-      EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(900)));
+      EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(900), _));
     }
 
     driver_ = std::make_unique<Driver>(datadog_config, cm_, stats_, tls_, runtime_);
@@ -146,9 +147,9 @@ TEST_F(DatadogDriverTest, FlushSpansTimer) {
   span->finishSpan();
 
   // Timer should be re-enabled.
-  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(900)));
+  EXPECT_CALL(*timer_, enableTimer(std::chrono::milliseconds(900), _));
 
-  timer_->callback_();
+  timer_->invokeCallback();
 
   EXPECT_EQ(1U, stats_.counter("tracing.datadog.timer_flushed").value());
   EXPECT_EQ(1U, stats_.counter("tracing.datadog.traces_sent").value());

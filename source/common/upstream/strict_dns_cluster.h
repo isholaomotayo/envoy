@@ -1,5 +1,8 @@
 #pragma once
 
+#include "envoy/api/v2/cds.pb.h"
+#include "envoy/api/v2/endpoint/endpoint.pb.h"
+
 #include "common/upstream/cluster_factory_impl.h"
 #include "common/upstream/upstream_impl.h"
 
@@ -52,6 +55,7 @@ private:
   Network::DnsResolverSharedPtr dns_resolver_;
   std::list<ResolveTargetPtr> resolve_targets_;
   const std::chrono::milliseconds dns_refresh_rate_ms_;
+  BackOffStrategyPtr failure_backoff_strategy_;
   const bool respect_dns_ttl_;
   Network::DnsLookupFamily dns_lookup_family_;
   uint32_t overprovisioning_factor_;
